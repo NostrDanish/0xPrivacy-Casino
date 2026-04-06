@@ -1,9 +1,12 @@
 import { BrowserRouter, Route, Routes } from "react-router-dom";
 import { ScrollToTop } from "./components/ScrollToTop";
 
+// Casino Gaming Routes
+
 import Index from "./pages/Index";
 import CasinoDashboard from "./pages/CasinoDashboard";
 import SlotMachine from "./components/games/SlotMachine";
+import DiceRoll from "./components/games/DiceRoll";
 import { NIP19Page } from "./pages/NIP19Page";
 import NotFound from "./pages/NotFound";
 
