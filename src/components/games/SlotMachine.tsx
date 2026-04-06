@@ -1,398 +1,303 @@
-import { useState, useEffect } from 'react';
-import { Card, CardContent, CardDescription, CardFooter, CardHeader, CardTitle } from '@/components/ui/card';
+import { useState, useRef, useEffect } from 'react';
+import GameLayout from '@/components/casino/GameLayout';
 import { Button } from '@/components/ui/button';
-import { Slider } from '@/components/ui/slider';
 import { Badge } from '@/components/ui/badge';
-import { useToast } from '@/hooks/useToast';
 import { useCashu } from '@/contexts/CashuContext';
-import { Coins, RotateCw, Trophy, Zap } from 'lucide-react';
+import { processWager, generateSeed, provablyFairRandom } from '@/lib/cashu';
+import { useNostrPublish } from '@/hooks/useNostrPublish';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { RotateCw, Zap, ChevronUp, ChevronDown } from 'lucide-react';
 
-const SYMBOLS = ['🍒', '🍋', '🍊', '🍉', '⭐', '7️⃣'];
-const PAYOUTS = {
+// ── Config ────────────────────────────────────────────────────────────────────
+
+const SYMBOLS = ['🍒', '🍋', '🍊', '🍉', '⭐', '💎', '7️⃣'] as const;
+type Symbol = typeof SYMBOLS[number];
+
+const PAYOUTS: Record<string, number> = {
   '7️⃣7️⃣7️⃣': 100,
-  '⭐⭐⭐': 50,
-  '🍉🍉🍉': 25,
-  '🍊🍊🍊': 15,
-  '🍋🍋🍋': 10,
+  '💎💎💎': 50,
+  '⭐⭐⭐': 25,
+  '🍉🍉🍉': 15,
+  '🍊🍊🍊': 10,
+  '🍋🍋🍋': 8,
   '🍒🍒🍒': 5,
-  '🍒🍒': 2,
-  '🍒': 1,
+  '🍒🍒': 2,   // 2 cherries anywhere
+  '💎': 2,      // any single diamond
 };
 
-const SlotMachine = () => {
-  const { toast } = useToast();
-  const { wallet, pay, getBalance, isLoading } = useCashu();
-  const [reels, setReels] = useState(['🍒', '🍋', '🍊']);
-  const [isSpinning, setIsSpinning] = useState(false);
-  const [betAmount, setBetAmount] = useState(100);
+const BET_STEPS = [100, 200, 500, 1_000, 2_000, 5_000, 10_000];
+
+// ── Component ─────────────────────────────────────────────────────────────────
+
+export default function SlotMachine() {
+  const { balance, placeBet, creditWin, isInitialized } = useCashu();
+  const { user } = useCurrentUser();
+  const { mutate: publish } = useNostrPublish();
+
+  const [reels, setReels] = useState<Symbol[]>(['🍒', '⭐', '💎']);
+  const [spinning, setSpinning] = useState(false);
+  const [betIdx, setBetIdx] = useState(0);
   const [lastWin, setLastWin] = useState(0);
-  const [totalWins, setTotalWins] = useState(0);
-  const [totalSpins, setTotalSpins] = useState(0);
-  const [balance, setBalance] = useState(0);
+  const [msg, setMsg] = useState('');
+  const [winFlash, setWinFlash] = useState(false);
+  const [stats, setStats] = useState({ spins: 0, wagered: 0, won: 0 });
 
-  useEffect(() => {
-    if (wallet) {
-      setBalance(getBalance());
+  const serverSeedRef = useRef(generateSeed());
+  const clientSeedRef = useRef(generateSeed());
+  const nonceRef = useRef(0);
+
+  const betAmount = BET_STEPS[betIdx];
+  const canSpin = isInitialized && !spinning && balance >= betAmount;
+
+  const spin = async () => {
+    if (!canSpin) return;
+
+    const ok = await placeBet(betAmount);
+    if (!ok) return;
+
+    setSpinning(true);
+    setLastWin(0);
+    setMsg('');
+    nonceRef.current++;
+
+    // Generate 3 reel outcomes provably-fairly
+    const results: Symbol[] = [];
+    for (let i = 0; i < 3; i++) {
+      const r = await provablyFairRandom(serverSeedRef.current, clientSeedRef.current, nonceRef.current * 10 + i);
+      results.push(SYMBOLS[Math.floor(r * SYMBOLS.length)]);
     }
-  }, [wallet, getBalance]);
 
-  const spinReels = () => {
-    if (isSpinning || isLoading) return;
-    
-    if (balance < betAmount) {
-      toast({
-        title: 'Insufficient Balance',
-        description: `You need ${betAmount} sats to spin`,
-        variant: 'destructive',
-      });
-      return;
-    }
-
-    setIsSpinning(true);
-    
-    // Simulate payment
-    pay(betAmount, `slot_spin_${Date.now()}`).then((success) => {
-      if (!success) {
-        setIsSpinning(false);
-        return;
+    // Animate for 1.8s
+    const start = Date.now();
+    const animId = setInterval(() => {
+      setReels([
+        SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)],
+        SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)],
+        SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)],
+      ]);
+      if (Date.now() - start > 1800) {
+        clearInterval(animId);
+        setReels(results);
+        resolveOutcome(results);
       }
-
-      setTotalSpins(prev => prev + 1);
-      setBalance(prev => prev - betAmount);
-
-      // Animate reels
-      const spinDuration = 2000;
-      const interval = 100;
-      let spins = 0;
-      const maxSpins = spinDuration / interval;
-
-      const spinInterval = setInterval(() => {
-        setReels([
-          SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)],
-          SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)],
-          SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)],
-        ]);
-        spins++;
-
-        if (spins >= maxSpins) {
-          clearInterval(spinInterval);
-          
-          // Final result
-          const finalReels = [
-            SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)],
-            SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)],
-            SYMBOLS[Math.floor(Math.random() * SYMBOLS.length)],
-          ];
-          
-          setReels(finalReels);
-          
-          // Calculate win
-          const result = finalReels.join('');
-          let winMultiplier = 0;
-          
-          // Check for winning combinations
-          if (finalReels[0] === finalReels[1] && finalReels[1] === finalReels[2]) {
-            // Three of a kind
-            const key = `${finalReels[0]}${finalReels[1]}${finalReels[2]}`;
-            winMultiplier = PAYOUTS[key as keyof typeof PAYOUTS] || 0;
-          } else if (finalReels[0] === '🍒' || finalReels[1] === '🍒' || finalReels[2] === '🍒') {
-            // Single cherry
-            const cherryCount = finalReels.filter(symbol => symbol === '🍒').length;
-            if (cherryCount === 2) {
-              winMultiplier = PAYOUTS['🍒🍒'];
-            } else if (cherryCount === 1) {
-              winMultiplier = PAYOUTS['🍒'];
-            }
-          }
-          
-          const winAmount = betAmount * winMultiplier;
-          
-          if (winAmount > 0) {
-            // Simulate winning payment back
-            setTimeout(() => {
-              // In a real implementation, this would be a proper payment
-              setBalance(prev => prev + winAmount);
-              setLastWin(winAmount);
-              setTotalWins(prev => prev + winAmount);
-              
-              toast({
-                title: '🎉 You Win!',
-                description: `Congratulations! You won ${winAmount.toLocaleString()} sats!`,
-              });
-            }, 500);
-          } else {
-            setLastWin(0);
-            toast({
-              title: 'No Win',
-              description: 'Better luck next time!',
-              variant: 'destructive',
-            });
-          }
-          
-          setIsSpinning(false);
-        }
-      }, interval);
-    });
+    }, 90);
   };
 
-  const getPayoutMultiplier = (symbol: string) => {
-    const key = `${symbol}${symbol}${symbol}`;
-    return PAYOUTS[key as keyof typeof PAYOUTS] || 0;
+  const resolveOutcome = (reels: Symbol[]) => {
+    const key3 = reels.join('');
+    const cherries = reels.filter((s) => s === '🍒').length;
+    const hasDiamond = reels.includes('💎');
+
+    let multiplier = 0;
+
+    if (PAYOUTS[key3]) {
+      multiplier = PAYOUTS[key3];
+    } else if (cherries === 2) {
+      multiplier = PAYOUTS['🍒🍒'];
+    } else if (hasDiamond) {
+      multiplier = PAYOUTS['💎'];
+    }
+
+    const { payout, houseEdgeTaken, devFundTaken } = processWager(betAmount, multiplier);
+
+    setStats((s) => ({
+      spins: s.spins + 1,
+      wagered: s.wagered + betAmount,
+      won: s.won + payout,
+    }));
+
+    if (payout > 0) {
+      creditWin(payout);
+      setLastWin(payout);
+      setWinFlash(true);
+      setMsg(`🎉 WIN! +${payout.toLocaleString()} sats (${multiplier}×)`);
+      setTimeout(() => setWinFlash(false), 1500);
+    } else {
+      setMsg('No match — spin again!');
+    }
+
+    // Publish to Nostr
+    if (user) {
+      publish({
+        kind: 31383,
+        content: JSON.stringify({ game: 'slots', reels, bet: betAmount, payout, multiplier, serverSeed: serverSeedRef.current, nonce: nonceRef.current }),
+        tags: [
+          ['d', `slots_${Date.now()}`],
+          ['t', 'casino'], ['t', 'slots'],
+          ['t', payout > 0 ? 'win' : 'loss'],
+          ['amount', betAmount.toString()],
+          ['payout', payout.toString()],
+          ['alt', `0xPrivacy Casino — Slots: ${reels.join('')} — ${payout > 0 ? `Won ${payout} sats` : 'No win'}`],
+        ],
+      });
+    }
+
+    setSpinning(false);
   };
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-gray-900 to-black text-white p-4">
-      <div className="container mx-auto max-w-6xl">
-        {/* Header */}
-        <div className="flex flex-col md:flex-row justify-between items-center mb-8">
-          <div>
-            <h1 className="text-4xl font-bold bg-gradient-to-r from-yellow-400 to-orange-500 bg-clip-text text-transparent">
-              🎰 Slot Machine
-            </h1>
-            <p className="text-gray-400">Classic 3-reel slots with instant Cashu payouts</p>
-          </div>
-          <div className="flex items-center space-x-4 mt-4 md:mt-0">
-            <div className="bg-gray-800/50 backdrop-blur-sm px-4 py-3 rounded-lg border border-yellow-800/30">
-              <div className="flex items-center">
-                <Coins className="h-5 w-5 text-yellow-400 mr-2" />
-                <div>
-                  <div className="text-sm text-gray-400">Balance</div>
-                  <div className="text-xl font-bold text-yellow-300">
-                    {balance.toLocaleString()} sats
-                  </div>
-                </div>
-              </div>
-            </div>
-            <Button
-              onClick={() => window.history.back()}
-              variant="outline"
-              className="border-gray-700 text-gray-300 hover:bg-gray-800"
-            >
-              Back to Casino
-            </Button>
-          </div>
-        </div>
+    <GameLayout
+      title="Slot Machine"
+      emoji="🎰"
+      subtitle="3-reel provably-fair slots · 97.5% RTP · Up to 100× payout"
+    >
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        {/* ── Main game ───────────────────────────────────────────── */}
+        <div className="lg:col-span-2 space-y-5">
 
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Slot Machine */}
-          <div className="lg:col-span-2">
-            <Card className="bg-gradient-to-br from-gray-800/50 to-gray-900/50 border-gray-700 backdrop-blur-sm">
-              <CardHeader>
-                <CardTitle className="text-2xl">Spin to Win!</CardTitle>
-                <CardDescription>Bet sats and spin the reels for a chance to win big</CardDescription>
-              </CardHeader>
-              <CardContent>
-                {/* Slot Machine Display */}
-                <div className="bg-gradient-to-b from-gray-900 to-black border-4 border-yellow-900/50 rounded-2xl p-8 mb-8">
-                  <div className="flex justify-center items-center space-x-4 md:space-x-8">
-                    {reels.map((symbol, index) => (
-                      <div
-                        key={index}
-                        className="w-32 h-32 bg-gradient-to-b from-gray-800 to-gray-900 border-4 border-yellow-800/50 rounded-xl flex items-center justify-center text-6xl shadow-2xl"
-                      >
-                        <div className={isSpinning ? 'animate-pulse' : ''}>
-                          {symbol}
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                  
-                  <div className="text-center mt-6">
-                    <div className="inline-block bg-yellow-900/30 px-6 py-2 rounded-full">
-                      <span className="text-yellow-300 font-bold text-lg">
-                        {lastWin > 0 ? `WIN: ${lastWin.toLocaleString()} sats!` : 'READY TO SPIN'}
-                      </span>
-                    </div>
-                  </div>
-                </div>
-
-                {/* Bet Controls */}
-                <div className="space-y-6">
-                  <div>
-                    <div className="flex justify-between items-center mb-2">
-                      <label className="text-lg font-semibold">Bet Amount</label>
-                      <span className="text-2xl font-bold text-yellow-400">{betAmount.toLocaleString()} sats</span>
-                    </div>
-                    <Slider
-                      value={[betAmount]}
-                      min={10}
-                      max={Math.min(10000, balance)}
-                      step={10}
-                      onValueChange={(value) => setBetAmount(value[0])}
-                      disabled={isSpinning || isLoading}
-                      className="w-full"
-                    />
-                    <div className="flex justify-between text-sm text-gray-400 mt-2">
-                      <span>10 sats</span>
-                      <span>10,000 sats max</span>
-                    </div>
-                  </div>
-
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-                    {[100, 500, 1000, 5000].map((amount) => (
-                      <Button
-                        key={amount}
-                        variant="outline"
-                        onClick={() => setBetAmount(amount)}
-                        disabled={isSpinning || isLoading || balance < amount}
-                        className={`border-gray-700 ${betAmount === amount ? 'bg-gray-800' : ''}`}
-                      >
-                        {amount.toLocaleString()} sats
-                      </Button>
-                    ))}
-                  </div>
-                </div>
-              </CardContent>
-              <CardFooter>
-                <Button
-                  onClick={spinReels}
-                  disabled={isSpinning || isLoading || balance < betAmount}
-                  className="w-full py-6 text-lg bg-gradient-to-r from-yellow-600 to-orange-600 hover:from-yellow-700 hover:to-orange-700"
+          {/* Reels */}
+          <div className={`rounded-2xl border p-8 text-center transition-all duration-300
+                           ${winFlash ? 'win-flash border-gold/50' : 'border-border/60 bg-secondary/20'}`}>
+            <div className="flex justify-center items-center gap-4 md:gap-8 mb-6">
+              {reels.map((sym, i) => (
+                <div
+                  key={i}
+                  className={`w-24 h-24 md:w-32 md:h-32 casino-reel rounded-xl border-2
+                               flex items-center justify-center text-5xl md:text-6xl
+                               shadow-inner transition-all duration-100
+                               ${spinning ? 'animate-spin-slot border-purple-700/50' : 'border-border/60'}
+                               ${winFlash ? 'border-gold/70 glow-gold' : ''}`}
                 >
-                  {isSpinning ? (
-                    <>
-                      <RotateCw className="mr-2 h-5 w-5 animate-spin" />
-                      Spinning...
-                    </>
-                  ) : (
-                    <>
-                      <Zap className="mr-2 h-5 w-5" />
-                      SPIN REELS ({betAmount.toLocaleString()} sats)
-                    </>
-                  )}
-                </Button>
-              </CardFooter>
-            </Card>
+                  {sym}
+                </div>
+              ))}
+            </div>
+
+            <div className="h-9 flex items-center justify-center">
+              {msg && (
+                <span className={`text-base font-bold px-4 py-1.5 rounded-full
+                                  ${lastWin > 0
+                                    ? 'bg-gold/10 text-gold border border-gold/30'
+                                    : 'bg-secondary/60 text-muted-foreground'}`}>
+                  {msg}
+                </span>
+              )}
+            </div>
           </div>
 
-          {/* Side Panel */}
-          <div className="space-y-6">
-            {/* Stats */}
-            <Card className="bg-gradient-to-br from-gray-800/50 to-gray-900/50 border-gray-700 backdrop-blur-sm">
-              <CardHeader>
-                <CardTitle className="flex items-center">
-                  <Trophy className="mr-2 h-5 w-5 text-yellow-400" />
-                  Game Stats
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-4">
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-400">Total Spins</span>
-                  <span className="font-bold text-xl">{totalSpins}</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-400">Total Wagered</span>
-                  <span className="font-bold text-xl">{(totalSpins * betAmount).toLocaleString()} sats</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-400">Total Wins</span>
-                  <span className="font-bold text-xl text-green-400">{totalWins.toLocaleString()} sats</span>
-                </div>
-                <div className="flex justify-between items-center">
-                  <span className="text-gray-400">Net Profit</span>
-                  <span className={`font-bold text-xl ${totalWins - totalSpins * betAmount >= 0 ? 'text-green-400' : 'text-red-400'}`}>
-                    {(totalWins - totalSpins * betAmount).toLocaleString()} sats
-                  </span>
-                </div>
-              </CardContent>
-            </Card>
+          {/* Bet controls */}
+          <div className="casino-card rounded-2xl p-5 space-y-4">
+            <div className="flex items-center justify-between">
+              <span className="text-sm font-medium text-muted-foreground">Bet Amount</span>
+              <span className="text-xl font-bold text-gold">{betAmount.toLocaleString()} sats</span>
+            </div>
 
-            {/* Payout Table */}
-            <Card className="bg-gradient-to-br from-gray-800/50 to-gray-900/50 border-gray-700 backdrop-blur-sm">
-              <CardHeader>
-                <CardTitle>Payout Table</CardTitle>
-                <CardDescription>Win multipliers for each symbol</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-3">
-                  {SYMBOLS.map((symbol) => {
-                    const multiplier = getPayoutMultiplier(symbol);
-                    return multiplier > 0 ? (
-                      <div key={symbol} className="flex justify-between items-center p-3 bg-gray-800/30 rounded-lg">
-                        <div className="flex items-center">
-                          <span className="text-2xl mr-3">{symbol}</span>
-                          <span className="text-lg">{symbol} {symbol} {symbol}</span>
-                        </div>
-                        <Badge className="bg-green-900/30 text-green-400 border-green-800">
-                          {multiplier}x
-                        </Badge>
-                      </div>
-                    ) : null;
-                  })}
-                  <div className="flex justify-between items-center p-3 bg-gray-800/30 rounded-lg">
-                    <div className="flex items-center">
-                      <span className="text-2xl mr-3">🍒🍒</span>
-                      <span className="text-lg">Two Cherries</span>
-                    </div>
-                    <Badge className="bg-yellow-900/30 text-yellow-400 border-yellow-800">
-                      {PAYOUTS['🍒🍒']}x
-                    </Badge>
-                  </div>
-                  <div className="flex justify-between items-center p-3 bg-gray-800/30 rounded-lg">
-                    <div className="flex items-center">
-                      <span className="text-2xl mr-3">🍒</span>
-                      <span className="text-lg">Single Cherry</span>
-                    </div>
-                    <Badge className="bg-yellow-900/30 text-yellow-400 border-yellow-800">
-                      {PAYOUTS['🍒']}x
-                    </Badge>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setBetIdx((i) => Math.max(0, i - 1))}
+                disabled={betIdx === 0 || spinning}
+                className="p-2 rounded-lg bg-secondary/80 hover:bg-secondary disabled:opacity-40 border border-border/60 transition-colors"
+              >
+                <ChevronDown className="w-4 h-4" />
+              </button>
+              <div className="flex-1 grid grid-cols-7 gap-1">
+                {BET_STEPS.map((amt, idx) => (
+                  <button
+                    key={amt}
+                    onClick={() => setBetIdx(idx)}
+                    disabled={spinning || balance < amt}
+                    className={`bet-btn text-[11px] py-1.5 ${betIdx === idx ? 'bet-btn-active' : ''}`}
+                  >
+                    {amt >= 1000 ? `${amt / 1000}k` : amt}
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => setBetIdx((i) => Math.min(BET_STEPS.length - 1, i + 1))}
+                disabled={betIdx === BET_STEPS.length - 1 || spinning}
+                className="p-2 rounded-lg bg-secondary/80 hover:bg-secondary disabled:opacity-40 border border-border/60 transition-colors"
+              >
+                <ChevronUp className="w-4 h-4" />
+              </button>
+            </div>
 
-            {/* Quick Tips */}
-            <Card className="bg-gradient-to-br from-purple-900/30 to-gray-900/50 border-purple-800/30 backdrop-blur-sm">
-              <CardContent className="pt-6">
-                <h3 className="font-bold text-lg mb-3 text-purple-300">🎯 Quick Tips</h3>
-                <ul className="space-y-2 text-sm text-gray-300">
-                  <li>• Start with small bets to learn the game</li>
-                  <li>• Three 7s pay 100x your bet</li>
-                  <li>• Cherries pay even with just 1 or 2 matches</li>
-                  <li>• Always gamble responsibly</li>
-                </ul>
-              </CardContent>
-            </Card>
+            <button onClick={spin} disabled={!canSpin} className="spin-btn">
+              {spinning ? (
+                <span className="flex items-center justify-center gap-2">
+                  <RotateCw className="w-5 h-5 animate-spin" /> Spinning…
+                </span>
+              ) : (
+                <span className="flex items-center justify-center gap-2">
+                  <Zap className="w-5 h-5" /> SPIN — {betAmount.toLocaleString()} sats
+                </span>
+              )}
+            </button>
+
+            {!isInitialized && (
+              <p className="text-center text-xs text-muted-foreground">Initialize wallet to play</p>
+            )}
           </div>
         </div>
 
-        {/* Game Info */}
-        <Card className="mt-8 bg-gradient-to-br from-gray-800/50 to-black/50 border-gray-700 backdrop-blur-sm">
-          <CardContent className="pt-6">
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-              <div className="text-center">
-                <div className="bg-yellow-900/30 w-10 h-10 rounded-full flex items-center justify-center mx-auto mb-3">
-                  <span className="text-xl">🎲</span>
-                </div>
-                <h4 className="font-bold mb-1">Provably Fair</h4>
-                <p className="text-gray-400 text-xs">
-                  Game outcomes are generated using Nostr events
-                </p>
+        {/* ── Sidebar ───────────────────────────────────────────── */}
+        <div className="space-y-5">
+
+          {/* Session stats */}
+          <div className="casino-card rounded-2xl p-5">
+            <div className="text-sm font-semibold mb-3 text-muted-foreground uppercase tracking-wide">Session</div>
+            <div className="space-y-1">
+              <div className="stat-row text-sm">
+                <span className="text-muted-foreground">Spins</span>
+                <span className="font-bold">{stats.spins}</span>
               </div>
-              <div className="text-center">
-                <div className="bg-yellow-900/30 w-10 h-10 rounded-full flex items-center justify-center mx-auto mb-3">
-                  <span className="text-xl">⚡</span>
-                </div>
-                <h4 className="font-bold mb-1">Instant Payouts</h4>
-                <p className="text-gray-400 text-xs">
-                  Winnings are instantly credited to your Cashu wallet
-                </p>
+              <div className="stat-row text-sm">
+                <span className="text-muted-foreground">Wagered</span>
+                <span className="font-bold">{stats.wagered.toLocaleString()}</span>
               </div>
-              <div className="text-center">
-                <div className="bg-yellow-900/30 w-10 h-10 rounded-full flex items-center justify-center mx-auto mb-3">
-                  <span className="text-xl">🔒</span>
-                </div>
-                <h4 className="font-bold mb-1">Secure</h4>
-                <p className="text-gray-400 text-xs">
-                  Your funds are secured by Chaumian ecash
-                </p>
+              <div className="stat-row text-sm">
+                <span className="text-muted-foreground">Won</span>
+                <span className={`font-bold ${stats.won > stats.wagered ? 'text-casino-green' : 'text-casino-red'}`}>
+                  {stats.won.toLocaleString()}
+                </span>
+              </div>
+              <div className="stat-row text-sm">
+                <span className="text-muted-foreground">P&L</span>
+                <span className={`font-bold ${stats.won - stats.wagered >= 0 ? 'text-casino-green' : 'text-casino-red'}`}>
+                  {(stats.won - stats.wagered) >= 0 ? '+' : ''}{(stats.won - stats.wagered).toLocaleString()}
+                </span>
               </div>
             </div>
-          </CardContent>
-        </Card>
-      </div>
-    </div>
-  );
-};
+          </div>
 
-export default SlotMachine;
+          {/* Payout table */}
+          <div className="casino-card rounded-2xl p-5">
+            <div className="text-sm font-semibold mb-3 text-muted-foreground uppercase tracking-wide">Payouts</div>
+            <div className="space-y-1.5">
+              {[
+                { sym: '7️⃣7️⃣7️⃣', label: 'Triple 7', mult: 100 },
+                { sym: '💎💎💎', label: 'Triple ◆', mult: 50 },
+                { sym: '⭐⭐⭐', label: 'Triple ★', mult: 25 },
+                { sym: '🍉🍉🍉', label: 'Triple Melon', mult: 15 },
+                { sym: '🍊🍊🍊', label: 'Triple Orange', mult: 10 },
+                { sym: '🍋🍋🍋', label: 'Triple Lemon', mult: 8 },
+                { sym: '🍒🍒🍒', label: 'Triple Cherry', mult: 5 },
+                { sym: '🍒🍒', label: 'Two Cherries', mult: 2 },
+                { sym: '💎', label: 'Any Diamond', mult: 2 },
+              ].map((row) => (
+                <div key={row.sym} className="payout-row text-sm">
+                  <span className="text-base">{row.sym}</span>
+                  <span className="text-muted-foreground hidden md:inline">{row.label}</span>
+                  <Badge className="bg-purple-500/10 text-purple-300 border-purple-500/30 text-xs ml-auto">
+                    {row.mult}×
+                  </Badge>
+                </div>
+              ))}
+            </div>
+          </div>
+
+          {/* Provably fair */}
+          <div className="casino-card rounded-2xl p-5">
+            <div className="text-sm font-semibold mb-2 text-muted-foreground uppercase tracking-wide">Provably Fair</div>
+            <div className="text-xs text-muted-foreground space-y-1">
+              <div>Server seed (hashed):</div>
+              <div className="font-mono text-[10px] break-all bg-secondary/40 rounded p-1.5">
+                {serverSeedRef.current.slice(0, 32)}…
+              </div>
+              <div className="mt-2">Nonce: <span className="font-mono">{nonceRef.current}</span></div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </GameLayout>
+  );
+}

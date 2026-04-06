@@ -4,89 +4,86 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222.2 84% 4.9%;
+    /* 0xPrivacy Casino - always dark */
+    --background: 222 25% 6%;
+    --foreground: 210 20% 92%;
 
-    --card: 0 0% 100%;
-    --card-foreground: 222.2 84% 4.9%;
+    --card: 222 20% 9%;
+    --card-foreground: 210 20% 92%;
 
-    --popover: 0 0% 100%;
-    --popover-foreground: 222.2 84% 4.9%;
+    --popover: 222 20% 9%;
+    --popover-foreground: 210 20% 92%;
 
-    --primary: 222.2 47.4% 11.2%;
-    --primary-foreground: 210 40% 98%;
+    --primary: 265 80% 65%;
+    --primary-foreground: 0 0% 100%;
 
-    --secondary: 210 40% 96.1%;
-    --secondary-foreground: 222.2 47.4% 11.2%;
+    --secondary: 222 20% 14%;
+    --secondary-foreground: 210 20% 80%;
 
-    --muted: 210 40% 96.1%;
-    --muted-foreground: 215.4 16.3% 46.9%;
+    --muted: 222 20% 12%;
+    --muted-foreground: 215 15% 52%;
 
-    --accent: 210 40% 96.1%;
-    --accent-foreground: 222.2 47.4% 11.2%;
+    --accent: 265 80% 65%;
+    --accent-foreground: 0 0% 100%;
 
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 210 40% 98%;
+    --destructive: 0 70% 50%;
+    --destructive-foreground: 0 0% 100%;
 
-    --border: 214.3 31.8% 91.4%;
-    --input: 214.3 31.8% 91.4%;
-    --ring: 222.2 84% 4.9%;
+    --border: 222 20% 16%;
+    --input: 222 20% 14%;
+    --ring: 265 80% 65%;
 
     --radius: 0.75rem;
 
-    --sidebar-background: 0 0% 98%;
+    /* Casino gold accent */
+    --gold: 45 90% 58%;
+    --gold-muted: 45 60% 35%;
 
-    --sidebar-foreground: 240 5.3% 26.1%;
+    /* Casino green */
+    --casino-green: 142 72% 45%;
 
-    --sidebar-primary: 240 5.9% 10%;
+    /* Casino red */
+    --casino-red: 0 72% 55%;
 
-    --sidebar-primary-foreground: 0 0% 98%;
-
-    --sidebar-accent: 240 4.8% 95.9%;
-
-    --sidebar-accent-foreground: 240 5.9% 10%;
-
-    --sidebar-border: 220 13% 91%;
-
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --sidebar-background: 222 25% 6%;
+    --sidebar-foreground: 210 20% 92%;
+    --sidebar-primary: 265 80% 65%;
+    --sidebar-primary-foreground: 0 0% 100%;
+    --sidebar-accent: 222 20% 12%;
+    --sidebar-accent-foreground: 210 20% 80%;
+    --sidebar-border: 222 20% 16%;
+    --sidebar-ring: 265 80% 65%;
   }
 
+  /* Force dark everywhere */
   .dark {
-    --background: 222.2 84% 4.9%;
-    --foreground: 210 40% 98%;
-
-    --card: 222.2 84% 4.9%;
-    --card-foreground: 210 40% 98%;
-
-    --popover: 222.2 84% 4.9%;
-    --popover-foreground: 210 40% 98%;
-
-    --primary: 210 40% 98%;
-    --primary-foreground: 222.2 47.4% 11.2%;
-
-    --secondary: 217.2 32.6% 17.5%;
-    --secondary-foreground: 210 40% 98%;
-
-    --muted: 217.2 32.6% 17.5%;
-    --muted-foreground: 215 20.2% 65.1%;
-
-    --accent: 217.2 32.6% 17.5%;
-    --accent-foreground: 210 40% 98%;
-
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 210 40% 98%;
-
-    --border: 217.2 32.6% 17.5%;
-    --input: 217.2 32.6% 17.5%;
-    --ring: 212.7 26.8% 83.9%;
-    --sidebar-background: 240 5.9% 10%;
-    --sidebar-foreground: 240 4.8% 95.9%;
-    --sidebar-primary: 224.3 76.3% 48%;
+    --background: 222 25% 6%;
+    --foreground: 210 20% 92%;
+    --card: 222 20% 9%;
+    --card-foreground: 210 20% 92%;
+    --popover: 222 20% 9%;
+    --popover-foreground: 210 20% 92%;
+    --primary: 265 80% 65%;
+    --primary-foreground: 0 0% 100%;
+    --secondary: 222 20% 14%;
+    --secondary-foreground: 210 20% 80%;
+    --muted: 222 20% 12%;
+    --muted-foreground: 215 15% 52%;
+    --accent: 265 80% 65%;
+    --accent-foreground: 0 0% 100%;
+    --destructive: 0 70% 50%;
+    --destructive-foreground: 0 0% 100%;
+    --border: 222 20% 16%;
+    --input: 222 20% 14%;
+    --ring: 265 80% 65%;
+    --sidebar-background: 222 25% 6%;
+    --sidebar-foreground: 210 20% 92%;
+    --sidebar-primary: 265 80% 65%;
     --sidebar-primary-foreground: 0 0% 100%;
-    --sidebar-accent: 240 3.7% 15.9%;
-    --sidebar-accent-foreground: 240 4.8% 95.9%;
-    --sidebar-border: 240 3.7% 15.9%;
-    --sidebar-ring: 217.2 91.2% 59.8%;
+    --sidebar-accent: 222 20% 12%;
+    --sidebar-accent-foreground: 210 20% 80%;
+    --sidebar-border: 222 20% 16%;
+    --sidebar-ring: 265 80% 65%;
   }
 }
 
@@ -95,7 +92,133 @@
     @apply border-border;
   }
 
+  html {
+    color-scheme: dark;
+  }
+
   body {
     @apply bg-background text-foreground;
+    font-family: 'Outfit Variable', 'Outfit', system-ui, sans-serif;
+    background-color: hsl(222, 25%, 6%);
   }
 }
+
+/* Casino-specific utilities */
+@layer utilities {
+  .text-gold {
+    color: hsl(45, 90%, 58%);
+  }
+
+  .bg-gold {
+    background-color: hsl(45, 90%, 58%);
+  }
+
+  .border-gold {
+    border-color: hsl(45, 80%, 45%);
+  }
+
+  .text-casino-green {
+    color: hsl(142, 72%, 45%);
+  }
+
+  .text-casino-red {
+    color: hsl(0, 72%, 55%);
+  }
+
+  .glow-purple {
+    box-shadow: 0 0 20px hsl(265, 80%, 65%, 0.4), 0 0 40px hsl(265, 80%, 65%, 0.2);
+  }
+
+  .glow-gold {
+    box-shadow: 0 0 20px hsl(45, 90%, 58%, 0.4), 0 0 40px hsl(45, 90%, 58%, 0.15);
+  }
+
+  .glow-green {
+    box-shadow: 0 0 20px hsl(142, 72%, 45%, 0.4), 0 0 40px hsl(142, 72%, 45%, 0.15);
+  }
+
+  .casino-card {
+    @apply bg-card border border-border rounded-xl;
+    background: linear-gradient(145deg, hsl(222, 20%, 11%), hsl(222, 25%, 8%));
+  }
+
+  .casino-reel {
+    background: linear-gradient(180deg, hsl(222, 30%, 12%), hsl(222, 25%, 8%), hsl(222, 30%, 12%));
+  }
+
+  .animate-spin-slot {
+    animation: spinSlot 0.1s linear infinite;
+  }
+
+  @keyframes spinSlot {
+    0% { transform: translateY(0); opacity: 1; }
+    50% { transform: translateY(-10px); opacity: 0.5; }
+    100% { transform: translateY(0); opacity: 1; }
+  }
+
+  .animate-coin-flip {
+    animation: coinFlip 0.6s ease-in-out;
+  }
+
+  @keyframes coinFlip {
+    0% { transform: rotateY(0); }
+    50% { transform: rotateY(90deg) scale(0.8); }
+    100% { transform: rotateY(0) scale(1); }
+  }
+
+  .animate-roulette-spin {
+    animation: rouletteSpin 3s cubic-bezier(0.17, 0.67, 0.12, 0.99);
+  }
+
+  @keyframes rouletteSpin {
+    from { transform: rotate(0deg); }
+    to { transform: rotate(1440deg); }
+  }
+
+  .win-flash {
+    animation: winFlash 0.5s ease-in-out 3;
+  }
+
+  @keyframes winFlash {
+    0%, 100% { background-color: transparent; }
+    50% { background-color: hsl(45, 90%, 58%, 0.15); }
+  }
+
+  .bet-btn {
+    @apply px-3 py-1.5 rounded-lg text-sm font-semibold border border-border/60
+           bg-secondary/80 hover:bg-secondary text-foreground
+           transition-all duration-150 hover:border-purple-500/60
+           disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+
+  .bet-btn-active {
+    @apply border-purple-500 bg-purple-500/20 text-purple-300;
+  }
+
+  .spin-btn {
+    @apply w-full py-4 text-lg font-bold rounded-xl
+           bg-gradient-to-r from-purple-600 to-violet-600
+           hover:from-purple-500 hover:to-violet-500
+           text-white shadow-lg transition-all duration-200
+           disabled:opacity-50 disabled:cursor-not-allowed
+           active:scale-[0.98];
+  }
+
+  .stat-row {
+    @apply flex justify-between items-center py-2.5 border-b border-border/40 last:border-0;
+  }
+
+  .payout-row {
+    @apply flex justify-between items-center p-2.5 rounded-lg bg-secondary/40;
+  }
+}
+
+/* Scrollbar */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: hsl(222, 25%, 8%); }
+::-webkit-scrollbar-thumb { background: hsl(222, 20%, 22%); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: hsl(265, 60%, 45%); }
+
+/* Number inputs */
+input[type=number]::-webkit-inner-spin-button,
+input[type=number]::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
