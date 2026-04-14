@@ -1,6 +1,6 @@
 import {
   createContext, useContext, useState, useCallback,
-  ReactNode, useEffect, useRef,
+  ReactNode, useRef,
 } from 'react';
 import { useToast } from '@/hooks/useToast';
 import {
@@ -8,40 +8,32 @@ import {
   processWager, loadHouseStats, HouseStats, generateSeed,
 } from '@/lib/cashu';
 
-// ── Default mints ────────────────────────────────────────────────────────────
-
+// Default mints
 const DEFAULT_MINTS: CashuMintInfo[] = [
   { url: 'https://mint.minibits.cash/Bitcoin', name: 'Minibits', active: true },
   { url: 'https://mint.coinos.io', name: 'Coinos', active: true },
   { url: 'https://legend.lnbits.com/cashu/api/v1/4gr9Xcmz3XEkUNwiBiQGoC', name: 'LNbits', active: true },
 ];
 
-// ── Context type ─────────────────────────────────────────────────────────────
-
+// Context type
 export interface CashuContextType {
-  // State
   wallet: CashuWallet | null;
   isInitialized: boolean;
   isLoading: boolean;
   balance: number;
   houseStats: HouseStats;
-  // Wallet ops
   initializeWallet: () => void;
   refreshBalance: () => void;
   addMint: (mintUrl: string, name?: string) => void;
   setActiveMint: (mintUrl: string) => void;
-  // Payment ops
   deposit: (amount: number) => Promise<boolean>;
   withdraw: (amount: number) => Promise<string | null>;
-  // Game ops — use these in every game
   placeBet: (amount: number) => Promise<boolean>;
   creditWin: (amount: number) => void;
-  // Dev fund
   getDevFundBalance: () => number;
 }
 
-// ── Wallet serialisation helpers ──────────────────────────────────────────────
-
+// Wallet persistence
 function loadWallet(): CashuWallet | null {
   try {
     const raw = localStorage.getItem('casino:wallet');
@@ -49,15 +41,15 @@ function loadWallet(): CashuWallet | null {
       const data = JSON.parse(raw);
       return CashuWallet.fromJSON(data);
     }
-  } catch (_) { /* ignore */ }
+  } catch (e) {
+    console.warn('Failed to load wallet from localStorage:', e);
+  }
   return null;
 }
 
 function saveWallet(w: CashuWallet): void {
   localStorage.setItem('casino:wallet', JSON.stringify(w.toJSON()));
 }
-
-// ── Context ───────────────────────────────────────────────────────────────────
 
 const CashuContext = createContext<CashuContextType | undefined>(undefined);
 
@@ -80,8 +72,7 @@ export function CashuProvider({ children }: { children: ReactNode }) {
     setHouseStats(loadHouseStats());
   }, []);
 
-  // ── Init ────────────────────────────────────────────────────────────────────
-
+  // Init
   const initializeWallet = useCallback(() => {
     if (walletRef.current) {
       setIsInitialized(true);
@@ -93,7 +84,7 @@ export function CashuProvider({ children }: { children: ReactNode }) {
     saveWallet(w);
     setIsInitialized(true);
     syncBalance();
-    toast({ title: '⚡ Wallet ready', description: 'Your Cashu wallet is initialized.' });
+    toast({ title: 'Wallet ready', description: 'Your Cashu wallet is initialized.' });
   }, [syncBalance, toast]);
 
   const refreshBalance = useCallback(() => {
@@ -101,8 +92,7 @@ export function CashuProvider({ children }: { children: ReactNode }) {
     syncHouse();
   }, [syncBalance, syncHouse]);
 
-  // ── Mint management ─────────────────────────────────────────────────────────
-
+  // Mint management
   const addMint = useCallback((mintUrl: string, name?: string) => {
     if (!walletRef.current) return;
     walletRef.current.addMint({ url: mintUrl, name: name ?? mintUrl });
@@ -115,8 +105,7 @@ export function CashuProvider({ children }: { children: ReactNode }) {
     if (walletRef.current) saveWallet(walletRef.current);
   }, []);
 
-  // ── Deposit (simulate Lightning → Cashu tokens) ─────────────────────────────
-
+  // Deposit
   const deposit = useCallback(async (amount: number): Promise<boolean> => {
     if (!walletRef.current) {
       toast({ title: 'No wallet', description: 'Initialize your wallet first.', variant: 'destructive' });
@@ -124,12 +113,9 @@ export function CashuProvider({ children }: { children: ReactNode }) {
     }
     setIsLoading(true);
     try {
-      // In production: call mint API to get a Lightning invoice,
-      // user pays it, then poll until tokens are ready.
-      // Here we simulate tokens arriving immediately.
       await walletRef.current.mintToken(amount);
       syncBalance();
-      toast({ title: '✅ Deposit confirmed', description: `${amount.toLocaleString()} sats added to wallet.` });
+      toast({ title: 'Deposit confirmed', description: `${amount.toLocaleString()} sats added to wallet.` });
       return true;
     } catch (e) {
       toast({ title: 'Deposit failed', description: String(e), variant: 'destructive' });
@@ -139,8 +125,7 @@ export function CashuProvider({ children }: { children: ReactNode }) {
     }
   }, [syncBalance, toast]);
 
-  // ── Withdraw (burn tokens → Lightning invoice) ──────────────────────────────
-
+  // Withdraw
   const withdraw = useCallback(async (amount: number): Promise<string | null> => {
     if (!walletRef.current) return null;
     if (walletRef.current.balance < amount) {
@@ -152,9 +137,8 @@ export function CashuProvider({ children }: { children: ReactNode }) {
       const token = await walletRef.current.send(amount);
       if (!token) throw new Error('Failed to build token');
       syncBalance();
-      // In production: exchange token for a paid Lightning invoice at the mint.
-      const tokenStr = `cashuA${btoa(JSON.stringify(token))}`;
-      toast({ title: '✅ Withdrawal ready', description: `${amount.toLocaleString()} sats token created.` });
+      const tokenStr = 'cashuA' + btoa(JSON.stringify(token));
+      toast({ title: 'Withdrawal ready', description: `${amount.toLocaleString()} sats token created.` });
       return tokenStr;
     } catch (e) {
       toast({ title: 'Withdrawal failed', description: String(e), variant: 'destructive' });
@@ -164,13 +148,12 @@ export function CashuProvider({ children }: { children: ReactNode }) {
     }
   }, [syncBalance, toast]);
 
-  // ── Game ops ─────────────────────────────────────────────────────────────────
-
+  // Game ops
   const placeBet = useCallback(async (amount: number): Promise<boolean> => {
     if (!walletRef.current || walletRef.current.balance < amount) {
       toast({
         title: 'Insufficient balance',
-        description: `Need ${amount.toLocaleString()} sats — deposit more to play.`,
+        description: 'Deposit more sats to play.',
         variant: 'destructive',
       });
       return false;
@@ -188,11 +171,7 @@ export function CashuProvider({ children }: { children: ReactNode }) {
     syncHouse();
   }, [syncBalance, syncHouse]);
 
-  // ── Dev fund ──────────────────────────────────────────────────────────────────
-
   const getDevFundBalance = useCallback(() => loadHouseStats().devFundBalance, []);
-
-  // ── Context value ─────────────────────────────────────────────────────────────
 
   const value: CashuContextType = {
     wallet: walletRef.current,

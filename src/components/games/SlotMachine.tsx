@@ -98,7 +98,7 @@ export default function SlotMachine() {
       multiplier = PAYOUTS['💎'];
     }
 
-    const { payout, houseEdgeTaken, devFundTaken } = processWager(betAmount, multiplier);
+    const { payout } = processWager(betAmount, multiplier);
 
     setStats((s) => ({
       spins: s.spins + 1,
@@ -119,7 +119,7 @@ export default function SlotMachine() {
     // Publish to Nostr
     if (user) {
       publish({
-        kind: 31383,
+        kind: 4817,
         content: JSON.stringify({ game: 'slots', reels, bet: betAmount, payout, multiplier, serverSeed: serverSeedRef.current, nonce: nonceRef.current }),
         tags: [
           ['d', `slots_${Date.now()}`],

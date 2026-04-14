@@ -50,13 +50,13 @@ export default function DiceRoll() {
     setMsg('');
     nonceRef.current++;
 
-    // Animate
+    // Animate then finalise
     const start = Date.now();
     const anim = setInterval(() => {
       setRoll(Math.floor(Math.random() * 100) + 1);
       if (Date.now() - start > 900) {
         clearInterval(anim);
-        finalise();
+        void finalise(); // fire-and-forget the async fn
       }
     }, 60);
   };
@@ -86,7 +86,7 @@ export default function DiceRoll() {
 
     if (user) {
       publish({
-        kind: 31383,
+        kind: 4817,
         content: JSON.stringify({ game: 'dice', roll: result, target, mode, bet: betAmount, payout, win: isWin }),
         tags: [
           ['d', `dice_${Date.now()}`],

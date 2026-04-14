@@ -148,7 +148,7 @@ export default function Roulette() {
 
       if (user) {
         publish({
-          kind: 31383,
+          kind: 4817,
           content: JSON.stringify({ game: 'roulette', result: winNumber, bets, payout: totalPayout }),
           tags: [
             ['d', `roulette_${Date.now()}`],
@@ -163,8 +163,8 @@ export default function Roulette() {
     }, 3200);
   };
 
-  const EvenBetBtn = ({ label, type, value, color }: { label: string; type: BetType; value: string; color?: string }) => {
-    const bet = bets.find((b) => b.type === type);
+  const EvenBetBtn = ({ label, type, value, color }: { label: string; type: BetType; value: number | string; color?: string }) => {
+    const bet = bets.find((b) => b.type === type && b.value === value);
     return (
       <button
         onClick={() => addBet(type, value)}

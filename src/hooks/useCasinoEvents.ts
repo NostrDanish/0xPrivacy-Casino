@@ -60,7 +60,7 @@ export function useCasinoEvents() {
       }
 
       publishEvent({
-        kind: 31383,
+        kind: 4817,
         content,
         tags,
       });
@@ -119,7 +119,7 @@ export function useCasinoEvents() {
       }
 
       publishEvent({
-        kind: 31384,
+        kind: 9347,
         content,
         tags,
       });

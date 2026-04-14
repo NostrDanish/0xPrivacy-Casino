@@ -80,7 +80,7 @@ export default function CoinFlip() {
 
     if (user) {
       publish({
-        kind: 31383,
+        kind: 4817,
         content: JSON.stringify({ game: 'coinflip', result: flip, choice, bet: betAmount, payout: p, win: isWin }),
         tags: [
           ['d', `flip_${Date.now()}`], ['t', 'casino'], ['t', 'coinflip'],

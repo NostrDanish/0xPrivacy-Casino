@@ -158,8 +158,7 @@ export default function Blackjack() {
     }
   };
 
-  const stand = async () => {
-    if (phase !== 'playing') return;
+  const runDealer = async (pHand: Card[], betMult = 1): Promise<void> => {
     setPhase('dealer');
 
     // Reveal hole card and dealer draws to 17
@@ -173,7 +172,7 @@ export default function Blackjack() {
       setDealerHand([...dHand]);
     }
 
-    const pv = handValue(playerHand);
+    const pv = handValue(pHand);
     const dv = handValue(dHand);
 
     let outcome: string;
@@ -182,7 +181,12 @@ export default function Blackjack() {
     else if (pv < dv) outcome = 'lose';
     else outcome = 'push';
 
-    endGame(playerHand, dHand, outcome);
+    endGame(pHand, dHand, outcome, betMult);
+  };
+
+  const stand = async () => {
+    if (phase !== 'playing') return;
+    await runDealer(playerHand, 1);
   };
 
   const double = async () => {
@@ -195,7 +199,7 @@ export default function Blackjack() {
     if (isBust(newHand)) {
       endGame(newHand, dealerHand, 'bust', 2);
     } else {
-      await stand();
+      await runDealer(newHand, 2);
     }
   };
 
@@ -222,7 +226,7 @@ export default function Blackjack() {
 
     if (user) {
       publish({
-        kind: 31383,
+        kind: 4817,
         content: JSON.stringify({ game: 'blackjack', outcome, playerValue: handValue(pHand), dealerValue: handValue(dHand), bet: effectiveBet, payout: p }),
         tags: [
           ['d', `bj_${Date.now()}`], ['t', 'casino'], ['t', 'blackjack'],
