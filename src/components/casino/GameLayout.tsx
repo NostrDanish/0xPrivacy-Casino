@@ -1,7 +1,9 @@
 import { ReactNode, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useCashu } from '@/contexts/CashuContext';
-import { ChevronLeft, Zap, Wallet } from 'lucide-react';
+import { useCurrentUser } from '@/hooks/useCurrentUser';
+import { isAdminPubkey } from '@/lib/admin';
+import { ChevronLeft, Zap, Shield } from 'lucide-react';
 import WalletPanel from './WalletPanel';
 
 interface Props {
@@ -13,6 +15,7 @@ interface Props {
 
 export default function GameLayout({ title, emoji, subtitle, children }: Props) {
   const { balance, isInitialized } = useCashu();
+  const { user } = useCurrentUser();
   const [showWallet, setShowWallet] = useState(false);
 
   return (
@@ -32,6 +35,15 @@ export default function GameLayout({ title, emoji, subtitle, children }: Props) 
             <span className="font-bold text-sm">{emoji} {title}</span>
           </div>
           <div className="flex items-center gap-3">
+            {isAdminPubkey(user?.pubkey) && (
+              <Link
+                to="/admin"
+                className="flex items-center gap-1 px-2.5 py-1.5 rounded-lg text-xs font-medium text-purple-400 hover:text-purple-300 transition-colors border border-purple-500/20 hover:border-purple-500/40"
+              >
+                <Shield className="w-3 h-3" />
+                Admin
+              </Link>
+            )}
             <button
               onClick={() => setShowWallet(true)}
               className="flex items-center gap-2 px-3 py-1.5 rounded-xl border border-border/60 bg-secondary/80

@@ -3,6 +3,7 @@ import { ScrollToTop } from './components/ScrollToTop';
 
 // Pages
 import CasinoDashboard from './pages/CasinoDashboard';
+import AdminDashboard from './pages/AdminDashboard';
 import NotFound from './pages/NotFound';
 import { NIP19Page } from './pages/NIP19Page';
 
@@ -19,6 +20,7 @@ export function AppRouter() {
       <ScrollToTop />
       <Routes>
         <Route path="/" element={<CasinoDashboard />} />
+        <Route path="/admin" element={<AdminDashboard />} />
         {/* Casino games */}
         <Route path="/games/slots" element={<SlotMachine />} />
         <Route path="/games/dice" element={<DiceRoll />} />

@@ -8,6 +8,7 @@ import { useCashu } from '@/contexts/CashuContext';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { useAuthor } from '@/hooks/useAuthor';
 import { genUserName } from '@/lib/genUserName';
+import { isAdminPubkey } from '@/lib/admin';
 import { HOUSE_EDGE_PCT, DEV_FUND_PCT, TOTAL_RAKE } from '@/lib/cashu';
 import WalletPanel from '@/components/casino/WalletPanel';
 import {
@@ -103,6 +104,15 @@ export default function CasinoDashboard() {
             >
               0xPrivacy.online ↗
             </a>
+            {isAdminPubkey(user?.pubkey) && (
+              <Link
+                to="/admin"
+                className="flex items-center gap-1.5 text-purple-400 hover:text-purple-300 transition-colors font-medium"
+              >
+                <Shield className="w-3.5 h-3.5" />
+                Admin
+              </Link>
+            )}
           </nav>
 
           {/* Right cluster */}

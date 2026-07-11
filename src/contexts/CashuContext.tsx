@@ -6,6 +6,7 @@ import { useToast } from '@/hooks/useToast';
 import {
   CashuWallet, CashuMintInfo, CashuToken,
   processWager, loadHouseStats, HouseStats, generateSeed,
+  adjustPoolBalance, withdrawDevFund, resetHouseStats,
 } from '@/lib/cashu';
 
 // Default mints
@@ -31,6 +32,10 @@ export interface CashuContextType {
   placeBet: (amount: number) => Promise<boolean>;
   creditWin: (amount: number) => void;
   getDevFundBalance: () => number;
+  // Admin treasury controls
+  adminAdjustPool: (amount: number) => void;
+  adminWithdrawDevFund: (amount?: number) => number;
+  adminResetHouse: (initialPool?: number) => void;
 }
 
 // Wallet persistence
@@ -173,6 +178,34 @@ export function CashuProvider({ children }: { children: ReactNode }) {
 
   const getDevFundBalance = useCallback(() => loadHouseStats().devFundBalance, []);
 
+  // ── Admin treasury controls ─────────────────────────────────────────────
+  const adminAdjustPool = useCallback((amount: number) => {
+    const updated = adjustPoolBalance(amount);
+    setHouseStats(updated);
+    toast({
+      title: 'Pool adjusted',
+      description: `Prize pool ${amount >= 0 ? 'increased' : 'decreased'} by ${Math.abs(amount).toLocaleString()} sats`,
+    });
+  }, [toast]);
+
+  const adminWithdrawDevFund = useCallback((amount?: number): number => {
+    const { withdrawn, stats: updated } = withdrawDevFund(amount);
+    setHouseStats(updated);
+    if (withdrawn > 0) {
+      toast({
+        title: 'Dev fund withdrawn',
+        description: `${withdrawn.toLocaleString()} sats marked for Lightning payout`,
+      });
+    }
+    return withdrawn;
+  }, [toast]);
+
+  const adminResetHouse = useCallback((initialPool = 100_000) => {
+    const updated = resetHouseStats(initialPool);
+    setHouseStats(updated);
+    toast({ title: 'House stats reset', description: `Pool set to ${initialPool.toLocaleString()} sats` });
+  }, [toast]);
+
   const value: CashuContextType = {
     wallet: walletRef.current,
     isInitialized,
@@ -188,6 +221,9 @@ export function CashuProvider({ children }: { children: ReactNode }) {
     placeBet,
     creditWin,
     getDevFundBalance,
+    adminAdjustPool,
+    adminWithdrawDevFund,
+    adminResetHouse,
   };
 
   return <CashuContext.Provider value={value}>{children}</CashuContext.Provider>;

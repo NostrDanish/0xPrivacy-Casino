@@ -25,10 +25,10 @@ export const DEV_FUND_PCT = 0.005;
 export const TOTAL_RAKE = HOUSE_EDGE_PCT + DEV_FUND_PCT;
 
 /**
- * Dev fund Nostr pubkey. In production this would be the 0xPrivacy dev npub.
- * Winnings go here via Cashu tokens sent as Nostr DMs or zaps.
+ * 0xPrivacy admin pubkey — controls the treasury and receives dev fund payouts.
+ * npub1xlldje77ptnnkhtzaspecvmch6wjmlf8u85xfrg8auutquuxl23s5c9up3
  */
-export const DEV_FUND_PUBKEY = '63f4f5248c37caab43402588d66558360c3c2c41829e1b04f400951cca6d5e39';
+export { ADMIN_PUBKEY as DEV_FUND_PUBKEY } from './admin';
 
 // ─── Types ───────────────────────────────────────────────────────────────────
 
@@ -268,6 +268,37 @@ export function processWager(betAmount: number, multiplier: number): {
   saveHouseStats(stats);
 
   return { payout, houseEdgeTaken, devFundTaken, netToPool };
+}
+
+// ─── Admin Treasury Operations ────────────────────────────────────────────────
+
+/** Adjust the house prize pool balance (admin only). */
+export function adjustPoolBalance(amount: number): HouseStats {
+  const stats = loadHouseStats();
+  stats.poolBalance = Math.max(0, stats.poolBalance + amount);
+  saveHouseStats(stats);
+  return stats;
+}
+
+/** Withdraw from the dev fund (marks it as paid out). Returns amount withdrawn. */
+export function withdrawDevFund(amount?: number): { withdrawn: number; stats: HouseStats } {
+  const stats = loadHouseStats();
+  const toWithdraw = amount ? Math.min(amount, stats.devFundBalance) : stats.devFundBalance;
+  stats.devFundBalance -= toWithdraw;
+  saveHouseStats(stats);
+  return { withdrawn: toWithdraw, stats };
+}
+
+/** Reset all house stats (admin emergency). */
+export function resetHouseStats(initialPool = 100_000): HouseStats {
+  const stats: HouseStats = {
+    poolBalance: initialPool,
+    devFundBalance: 0,
+    totalWagered: 0,
+    totalPaidOut: 0,
+  };
+  saveHouseStats(stats);
+  return stats;
 }
 
 // ─── Helpers ─────────────────────────────────────────────────────────────────
