@@ -1,55 +1,36 @@
 /**
- * 0xPrivacy Casino — Cashu (Chaumian Ecash) wallet implementation
+ * 0xPrivacy Casino — Real Cashu wallet layer using @cashu/cashu-ts
+ *
+ * Uses real Cashu mint interactions:
+ *  - Deposit: Lightning invoice from mint → user pays → mint issues proofs
+ *  - Withdraw: melt proofs to pay a Lightning invoice
+ *  - Token import/export: paste cashuA/cashuB tokens to move funds
  *
  * Revenue model:
- *  - HOUSE_EDGE_PCT  = 2% taken from every wager (goes to prize pool)
- *  - DEV_FUND_PCT    = 0.5% taken from every wager (goes to dev fund address)
- *  Together = 2.5% total rake.  Displayed transparently in the UI.
+ *  - HOUSE_EDGE_PCT  = 2%   (prize pool)
+ *  - DEV_FUND_PCT    = 0.5% (dev fund → 0xPrivaxy@cake.cash)
+ *  Together = 2.5% total rake.
  *
- * Architecture:
- *  - Client-side wallet stores Cashu "proofs" in localStorage
- *  - Proofs are verified against the active mint before being accepted
- *  - The house tracks a "pool balance" — winnings come from this pool
- *  - When pool is empty, games are paused until more players deposit
+ * Pool starts at 0 sats. Admin seeds it via Cashu token on the admin dashboard.
  */
+
+import { CashuMint, CashuWallet as SDKWallet, getDecodedToken, getEncodedTokenV4, MintQuoteState } from '@cashu/cashu-ts';
+import type { Proof, MintQuoteResponse, MeltQuoteResponse } from '@cashu/cashu-ts';
+
+export { ADMIN_PUBKEY as DEV_FUND_PUBKEY } from './admin';
 
 // ─── Config ──────────────────────────────────────────────────────────────────
 
-/** House edge taken from every bet (2%). Goes to the prize pool. */
 export const HOUSE_EDGE_PCT = 0.02;
-
-/** Dev fund cut from every bet (0.5%). Sent to dev fund Nostr pubkey. */
 export const DEV_FUND_PCT = 0.005;
-
-/** Total fee per wager. */
 export const TOTAL_RAKE = HOUSE_EDGE_PCT + DEV_FUND_PCT;
+export const DEFAULT_MINT_URL = 'https://mint.minibits.cash/Bitcoin';
 
-/**
- * 0xPrivacy admin pubkey — controls the treasury and receives dev fund payouts.
- * npub1xlldje77ptnnkhtzaspecvmch6wjmlf8u85xfrg8auutquuxl23s5c9up3
- */
-export { ADMIN_PUBKEY as DEV_FUND_PUBKEY } from './admin';
+// Re-export types
+export type { Proof, MintQuoteResponse, MeltQuoteResponse };
+export { MintQuoteState, getDecodedToken, getEncodedTokenV4 };
 
-// ─── Types ───────────────────────────────────────────────────────────────────
-
-export interface CashuProof {
-  id: string;
-  amount: number;
-  secret: string;
-}
-
-export interface CashuToken {
-  mint: string;
-  proofs: CashuProof[];
-}
-
-export interface CashuMintInfo {
-  url: string;
-  name?: string;
-  description?: string;
-  icon?: string;
-  active?: boolean;
-}
+// ─── House stats ─────────────────────────────────────────────────────────────
 
 export interface HouseStats {
   poolBalance: number;
@@ -58,188 +39,158 @@ export interface HouseStats {
   totalPaidOut: number;
 }
 
-// ─── Provably-fair RNG ───────────────────────────────────────────────────────
-
-/**
- * Provably-fair outcome using Web Crypto API.
- * Returns a float [0, 1) derived from SHA-256 of serverSeed + clientSeed + nonce.
- */
-export async function provablyFairRandom(
-  serverSeed: string,
-  clientSeed: string,
-  nonce: number,
-): Promise<number> {
-  const data = `${serverSeed}:${clientSeed}:${nonce}`;
-  const encoded = new TextEncoder().encode(data);
-  const hashBuffer = await crypto.subtle.digest('SHA-256', encoded);
-  const hashArray = new Uint8Array(hashBuffer);
-  // Use first 4 bytes as a 32-bit unsigned int → normalise to [0,1)
-  const intVal =
-    (hashArray[0] << 24) | (hashArray[1] << 16) | (hashArray[2] << 8) | hashArray[3];
-  return (intVal >>> 0) / 0x100000000;
-}
-
-/** Generate a random hex seed string. */
-export function generateSeed(length = 32): string {
-  const bytes = new Uint8Array(length);
-  crypto.getRandomValues(bytes);
-  return Array.from(bytes)
-    .map((b) => b.toString(16).padStart(2, '0'))
-    .join('');
-}
-
-// ─── Wallet ───────────────────────────────────────────────────────────────────
-
-export class CashuWallet {
-  private proofs: CashuProof[] = [];
-  readonly mints: CashuMintInfo[];
-  currentMint: CashuMintInfo | null;
-
-  constructor(mints: CashuMintInfo[] = []) {
-    this.mints = mints;
-    this.currentMint = mints[0] ?? null;
-  }
-
-  // ── Balance ──────────────────────────────────────────────────────────────
-
-  get balance(): number {
-    return this.proofs.reduce((s, p) => s + p.amount, 0);
-  }
-
-  // ── Mint tokens (deposit) ────────────────────────────────────────────────
-
-  /**
-   * Simulates requesting tokens from a Cashu mint after a Lightning payment.
-   * In production: generate blinded messages → send to mint → unblind signatures.
-   */
-  async mintToken(amount: number, mintUrl?: string): Promise<CashuToken | null> {
-    const url = mintUrl ?? this.currentMint?.url;
-    if (!url) return null;
-
-    // Build denominations using powers-of-2 (standard Cashu split)
-    const denominations = buildDenominations(amount);
-    const proofs: CashuProof[] = denominations.map((d) => ({
-      id: generateSeed(8),
-      amount: d,
-      secret: generateSeed(16),
-    }));
-
-    this.proofs.push(...proofs);
-    return { mint: url, proofs };
-  }
-
-  // ── Send / Pay ───────────────────────────────────────────────────────────
-
-  /** Deduct `amount` from the wallet. Returns the spent proofs as a token. */
-  async send(amount: number): Promise<CashuToken | null> {
-    if (this.balance < amount) return null;
-
-    const selected = selectProofs(this.proofs, amount);
-    if (!selected) return null;
-
-    const { spend, change, overage } = selected;
-
-    // Remove spent proofs
-    const spendIds = new Set(spend.map((p) => p.id));
-    this.proofs = this.proofs.filter((p) => !spendIds.has(p.id));
-
-    // Add change back if any
-    if (overage > 0) {
-      this.proofs.push({
-        id: generateSeed(8),
-        amount: overage,
-        secret: generateSeed(16),
-      });
-    }
-
-    return {
-      mint: this.currentMint?.url ?? '',
-      proofs: spend,
-    };
-  }
-
-  /** Credit the wallet with incoming proofs. */
-  async receive(token: CashuToken): Promise<boolean> {
-    this.proofs.push(...token.proofs);
-    return true;
-  }
-
-  /** Credit a specific amount directly (used after a game win). */
-  creditAmount(amount: number): void {
-    if (amount <= 0) return;
-    const denoms = buildDenominations(amount);
-    this.proofs.push(
-      ...denoms.map((d) => ({
-        id: generateSeed(8),
-        amount: d,
-        secret: generateSeed(16),
-      })),
-    );
-  }
-
-  // ── Mint management ───────────────────────────────────────────────────────
-
-  addMint(mint: CashuMintInfo): void {
-    if (!this.mints.find((m) => m.url === mint.url)) {
-      this.mints.push(mint);
-    }
-    if (!this.currentMint) this.currentMint = mint;
-  }
-
-  setMint(url: string): void {
-    const m = this.mints.find((m) => m.url === url);
-    if (m) this.currentMint = m;
-  }
-
-  // ── Serialisation ─────────────────────────────────────────────────────────
-
-  toJSON() {
-    return {
-      proofs: this.proofs,
-      mints: this.mints,
-      currentMintUrl: this.currentMint?.url,
-    };
-  }
-
-  static fromJSON(data: {
-    proofs: CashuProof[];
-    mints: CashuMintInfo[];
-    currentMintUrl?: string;
-  }): CashuWallet {
-    const w = new CashuWallet(data.mints);
-    w.proofs = data.proofs ?? [];
-    if (data.currentMintUrl) w.setMint(data.currentMintUrl);
-    return w;
-  }
-}
-
-// ─── House pool ───────────────────────────────────────────────────────────────
-
-/** Persistent house stats stored in localStorage. */
 export function loadHouseStats(): HouseStats {
   try {
     const raw = localStorage.getItem('casino:house');
     if (raw) return JSON.parse(raw) as HouseStats;
-  } catch (_) { /* ignore */ }
-  return { poolBalance: 100_000, devFundBalance: 0, totalWagered: 0, totalPaidOut: 0 };
+  } catch { /* ignore */ }
+  return { poolBalance: 0, devFundBalance: 0, totalWagered: 0, totalPaidOut: 0 };
 }
 
 export function saveHouseStats(stats: HouseStats): void {
   localStorage.setItem('casino:house', JSON.stringify(stats));
 }
 
-/**
- * Process a wager through the revenue model.
- * Returns the amount to pay the player if they win (after rake).
- *
- * @param betAmount  - raw bet in sats
- * @param multiplier - win multiplier (0 = loss, 2 = 2x, etc.)
- */
+// ─── Provably-fair RNG ───────────────────────────────────────────────────────
+
+export async function provablyFairRandom(
+  serverSeed: string, clientSeed: string, nonce: number,
+): Promise<number> {
+  const data = `${serverSeed}:${clientSeed}:${nonce}`;
+  const encoded = new TextEncoder().encode(data);
+  const hashBuffer = await crypto.subtle.digest('SHA-256', encoded);
+  const hashArray = new Uint8Array(hashBuffer);
+  const intVal = (hashArray[0] << 24) | (hashArray[1] << 16) | (hashArray[2] << 8) | hashArray[3];
+  return (intVal >>> 0) / 0x100000000;
+}
+
+export function generateSeed(length = 32): string {
+  const bytes = new Uint8Array(length);
+  crypto.getRandomValues(bytes);
+  return Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
+}
+
+// ─── Real Cashu Wallet ──────────────────────────────────────────────────────
+
+export class CasinoWallet {
+  private proofs: Proof[] = [];
+  private mintUrl: string;
+  private sdkWallet: SDKWallet | null = null;
+
+  constructor(mintUrl: string = DEFAULT_MINT_URL) {
+    this.mintUrl = mintUrl;
+  }
+
+  async init(): Promise<void> {
+    if (this.sdkWallet) return;
+    const mint = new CashuMint(this.mintUrl);
+    this.sdkWallet = new SDKWallet(mint);
+    await this.sdkWallet.loadMint();
+  }
+
+  get balance(): number {
+    return this.proofs.reduce((s, p) => s + p.amount, 0);
+  }
+
+  getMintUrl(): string { return this.mintUrl; }
+  getProofs(): Proof[] { return [...this.proofs]; }
+
+  // ── Deposit (Lightning) ────────────────────────────────────────────────
+
+  async requestMintQuote(amount: number): Promise<MintQuoteResponse> {
+    await this.init();
+    return this.sdkWallet!.createMintQuote(amount);
+  }
+
+  async checkMintQuote(quoteId: string): Promise<MintQuoteResponse> {
+    await this.init();
+    return this.sdkWallet!.checkMintQuote(quoteId);
+  }
+
+  async mintProofs(amount: number, quoteId: string): Promise<Proof[]> {
+    await this.init();
+    const proofs = await this.sdkWallet!.mintProofs(amount, quoteId);
+    this.proofs.push(...proofs);
+    return proofs;
+  }
+
+  // ── Withdraw (Lightning) ───────────────────────────────────────────────
+
+  async requestMeltQuote(invoice: string): Promise<MeltQuoteResponse> {
+    await this.init();
+    return this.sdkWallet!.createMeltQuote(invoice);
+  }
+
+  async meltProofs(quote: MeltQuoteResponse): Promise<boolean> {
+    await this.init();
+    const amount = quote.amount + quote.fee_reserve;
+    const { keep, send } = await this.sdkWallet!.send(amount, this.proofs);
+    this.proofs = keep;
+    try {
+      const result = await this.sdkWallet!.meltProofs(quote, send);
+      if (result.change && result.change.length > 0) {
+        this.proofs.push(...result.change);
+      }
+      return true;
+    } catch (e) {
+      // Return send proofs on failure
+      this.proofs.push(...send);
+      throw e;
+    }
+  }
+
+  // ── Token import / export ──────────────────────────────────────────────
+
+  async receiveToken(tokenStr: string): Promise<number> {
+    await this.init();
+    const received = await this.sdkWallet!.receive(tokenStr);
+    this.proofs.push(...received);
+    return received.reduce((s, p) => s + p.amount, 0);
+  }
+
+  async exportToken(amount: number): Promise<string> {
+    await this.init();
+    const { keep, send } = await this.sdkWallet!.send(amount, this.proofs);
+    this.proofs = keep;
+    return getEncodedTokenV4({ mint: this.mintUrl, proofs: send });
+  }
+
+  exportBackup(): string {
+    if (this.proofs.length === 0) return '';
+    return getEncodedTokenV4({ mint: this.mintUrl, proofs: this.proofs });
+  }
+
+  // ── Game operations ────────────────────────────────────────────────────
+
+  async deductBet(amount: number): Promise<Proof[]> {
+    if (this.balance < amount) throw new Error('Insufficient balance');
+    await this.init();
+    const { keep, send } = await this.sdkWallet!.send(amount, this.proofs);
+    this.proofs = keep;
+    return send;
+  }
+
+  addProofs(proofs: Proof[]): void {
+    this.proofs.push(...proofs);
+  }
+
+  // ── Serialisation ──────────────────────────────────────────────────────
+
+  toJSON(): { proofs: Proof[]; mintUrl: string } {
+    return { proofs: this.proofs, mintUrl: this.mintUrl };
+  }
+
+  static fromJSON(data: { proofs: Proof[]; mintUrl: string }): CasinoWallet {
+    const w = new CasinoWallet(data.mintUrl);
+    w.proofs = data.proofs ?? [];
+    return w;
+  }
+}
+
+// ─── Wager processing ────────────────────────────────────────────────────────
+
 export function processWager(betAmount: number, multiplier: number): {
-  payout: number;
-  houseEdgeTaken: number;
-  devFundTaken: number;
-  netToPool: number;
+  payout: number; houseEdgeTaken: number; devFundTaken: number; netToPool: number;
 } {
   const houseEdgeTaken = Math.floor(betAmount * HOUSE_EDGE_PCT);
   const devFundTaken = Math.floor(betAmount * DEV_FUND_PCT);
@@ -254,25 +205,22 @@ export function processWager(betAmount: number, multiplier: number): {
   let netToPool = 0;
 
   if (multiplier > 0) {
-    // Player wins
     payout = Math.floor(effectiveBet * multiplier);
+    payout = Math.min(payout, stats.poolBalance);
     stats.poolBalance -= payout;
     stats.totalPaidOut += payout;
-    netToPool = houseEdgeTaken - payout; // negative = pool paid out
+    netToPool = houseEdgeTaken - payout;
   } else {
-    // Player loses — all effective bet goes to pool
     netToPool = effectiveBet + houseEdgeTaken;
     stats.poolBalance += netToPool;
   }
 
   saveHouseStats(stats);
-
   return { payout, houseEdgeTaken, devFundTaken, netToPool };
 }
 
-// ─── Admin Treasury Operations ────────────────────────────────────────────────
+// ─── Admin operations ────────────────────────────────────────────────────────
 
-/** Adjust the house prize pool balance (admin only). */
 export function adjustPoolBalance(amount: number): HouseStats {
   const stats = loadHouseStats();
   stats.poolBalance = Math.max(0, stats.poolBalance + amount);
@@ -280,7 +228,6 @@ export function adjustPoolBalance(amount: number): HouseStats {
   return stats;
 }
 
-/** Withdraw from the dev fund (marks it as paid out). Returns amount withdrawn. */
 export function withdrawDevFund(amount?: number): { withdrawn: number; stats: HouseStats } {
   const stats = loadHouseStats();
   const toWithdraw = amount ? Math.min(amount, stats.devFundBalance) : stats.devFundBalance;
@@ -289,54 +236,22 @@ export function withdrawDevFund(amount?: number): { withdrawn: number; stats: Ho
   return { withdrawn: toWithdraw, stats };
 }
 
-/** Reset all house stats (admin emergency). */
-export function resetHouseStats(initialPool = 100_000): HouseStats {
-  const stats: HouseStats = {
-    poolBalance: initialPool,
-    devFundBalance: 0,
-    totalWagered: 0,
-    totalPaidOut: 0,
-  };
+export function resetHouseStats(initialPool = 0): HouseStats {
+  const stats: HouseStats = { poolBalance: initialPool, devFundBalance: 0, totalWagered: 0, totalPaidOut: 0 };
   saveHouseStats(stats);
   return stats;
 }
 
-// ─── Helpers ─────────────────────────────────────────────────────────────────
+// ─── Token helpers ───────────────────────────────────────────────────────────
 
-/** Split an amount into powers-of-2 denominations (Cashu standard). */
-function buildDenominations(amount: number): number[] {
-  const result: number[] = [];
-  let rem = amount;
-  for (let exp = 20; exp >= 0; exp--) {
-    const denom = Math.pow(2, exp);
-    while (rem >= denom) {
-      result.push(denom);
-      rem -= denom;
-    }
-  }
-  if (rem > 0) result.push(rem); // remainder for non-power amounts
-  return result;
+export function decodeTokenAmount(tokenStr: string): number {
+  try {
+    const decoded = getDecodedToken(tokenStr);
+    return decoded.proofs.reduce((s: number, p: Proof) => s + p.amount, 0);
+  } catch { return 0; }
 }
 
-/** Select proofs totalling exactly `amount`. Returns change/overage info. */
-function selectProofs(
-  proofs: CashuProof[],
-  amount: number,
-): { spend: CashuProof[]; change: CashuProof[]; overage: number } | null {
-  // Greedy selection: smallest proofs first to minimise overage
-  const sorted = [...proofs].sort((a, b) => a.amount - b.amount);
-  const spend: CashuProof[] = [];
-  let total = 0;
-
-  for (const p of sorted) {
-    if (total >= amount) break;
-    spend.push(p);
-    total += p.amount;
-  }
-
-  if (total < amount) return null; // not enough
-
-  const overage = total - amount;
-  const change = proofs.filter((p) => !spend.includes(p));
-  return { spend, change, overage };
+export function isValidCashuToken(str: string): boolean {
+  const trimmed = str.trim();
+  return trimmed.startsWith('cashuA') || trimmed.startsWith('cashuB');
 }

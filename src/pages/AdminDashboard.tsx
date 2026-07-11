@@ -26,17 +26,19 @@ export default function AdminDashboard() {
   const { toast } = useToast();
   const {
     houseStats, refreshBalance,
-    adminAdjustPool, adminWithdrawDevFund, adminResetHouse,
+    adminAdjustPool, adminWithdrawDevFund, adminResetHouse, adminSeedPool,
+    isLoading,
   } = useCashu();
 
   const { data: globalFeed } = useCasinoFeed(100);
 
   const [poolAdjustAmt, setPoolAdjustAmt] = useState(10_000);
   const [withdrawAmt, setWithdrawAmt] = useState<number | ''>('');
-  const [resetPoolAmt, setResetPoolAmt] = useState(100_000);
+  const [resetPoolAmt, setResetPoolAmt] = useState(0);
   const [lnCopied, setLnCopied] = useState(false);
   const [confirmReset, setConfirmReset] = useState(false);
   const [lastPayout, setLastPayout] = useState<{ amount: number; timestamp: number } | null>(null);
+  const [seedTokenPaste, setSeedTokenPaste] = useState('');
 
   // Guard: only admin can see this page
   if (!user || !isAdminPubkey(user.pubkey)) {
@@ -283,6 +285,34 @@ export default function AdminDashboard() {
             <div className="stat-row">
               <span className="text-sm text-muted-foreground">Current Pool</span>
               <span className="text-xl font-bold text-gold">{houseStats.poolBalance.toLocaleString()} sats</span>
+            </div>
+
+            {/* Seed pool with Cashu token */}
+            <div className="p-4 rounded-xl bg-gradient-to-br from-purple-900/20 to-violet-900/10 border border-purple-700/20 space-y-3">
+              <div className="text-sm font-semibold flex items-center gap-1.5">
+                <Zap className="w-4 h-4 text-gold" />
+                Seed Pool with Cashu Token
+              </div>
+              <p className="text-xs text-muted-foreground">
+                Paste a Cashu token to fund the prize pool. The token is validated with the mint and its value is added to the pool.
+              </p>
+              <textarea
+                value={seedTokenPaste}
+                onChange={(e) => setSeedTokenPaste(e.target.value)}
+                placeholder="Paste cashuA... or cashuB... token"
+                className="w-full bg-secondary/60 border border-border/60 rounded-lg p-3 text-xs font-mono min-h-[60px] resize-none text-foreground placeholder:text-muted-foreground/50"
+              />
+              <Button
+                onClick={async () => {
+                  const amt = await adminSeedPool(seedTokenPaste.trim());
+                  if (amt > 0) setSeedTokenPaste('');
+                }}
+                disabled={isLoading || !seedTokenPaste.trim()}
+                className="w-full bg-gradient-to-r from-purple-600 to-violet-600 hover:from-purple-500 hover:to-violet-500 text-white font-bold"
+              >
+                <Zap className="mr-2 w-4 h-4" />
+                {isLoading ? 'Processing...' : 'Seed Pool'}
+              </Button>
             </div>
 
             {/* Add/Remove from pool */}
