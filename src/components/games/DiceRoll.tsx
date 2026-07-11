@@ -1,10 +1,9 @@
 import { useState, useRef } from 'react';
 import GameLayout from '@/components/casino/GameLayout';
-import { Button } from '@/components/ui/button';
 import { Slider } from '@/components/ui/slider';
 import { useCashu } from '@/contexts/CashuContext';
 import { processWager, generateSeed, provablyFairRandom } from '@/lib/cashu';
-import { useNostrPublish } from '@/hooks/useNostrPublish';
+import { useCasinoEvents } from '@/hooks/useCasinoEvents';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { Dices, Zap, ChevronDown, ChevronUp } from 'lucide-react';
 
@@ -13,7 +12,7 @@ const BET_STEPS = [100, 200, 500, 1_000, 2_000, 5_000, 10_000];
 export default function DiceRoll() {
   const { balance, placeBet, creditWin, isInitialized } = useCashu();
   const { user } = useCurrentUser();
-  const { mutate: publish } = useNostrPublish();
+  const { publishGameResult } = useCasinoEvents();
 
   const [target, setTarget] = useState(50);
   const [roll, setRoll] = useState<number | null>(null);
@@ -29,6 +28,9 @@ export default function DiceRoll() {
   const serverSeedRef = useRef(generateSeed());
   const clientSeedRef = useRef(generateSeed());
   const nonceRef = useRef(0);
+
+  // Snapshot refs so the async finalise always uses the values at time of roll
+  const rollSnapshotRef = useRef({ betAmount: BET_STEPS[betIdx], mode, target, effectiveMultiplier: 0 });
 
   const betAmount = BET_STEPS[betIdx];
 
@@ -46,6 +48,9 @@ export default function DiceRoll() {
     const ok = await placeBet(betAmount);
     if (!ok) return;
 
+    // Capture values at roll time to avoid stale closure issues
+    rollSnapshotRef.current = { betAmount, mode, target, effectiveMultiplier };
+
     setRolling(true);
     setMsg('');
     nonceRef.current++;
@@ -56,22 +61,23 @@ export default function DiceRoll() {
       setRoll(Math.floor(Math.random() * 100) + 1);
       if (Date.now() - start > 900) {
         clearInterval(anim);
-        void finalise(); // fire-and-forget the async fn
+        void finalise();
       }
     }, 60);
   };
 
   const finalise = async () => {
+    const snap = rollSnapshotRef.current;
     const r = await provablyFairRandom(serverSeedRef.current, clientSeedRef.current, nonceRef.current);
     const result = Math.floor(r * 100) + 1; // 1–100
     setRoll(result);
 
-    const isWin = mode === 'under' ? result <= target : result >= target;
-    const multiplier = isWin ? effectiveMultiplier : 0;
-    const { payout } = processWager(betAmount, multiplier);
+    const isWin = snap.mode === 'under' ? result <= snap.target : result >= snap.target;
+    const multiplier = isWin ? snap.effectiveMultiplier : 0;
+    const { payout } = processWager(snap.betAmount, multiplier);
 
-    setStats((s) => ({ rolls: s.rolls + 1, wagered: s.wagered + betAmount, won: s.won + payout }));
-    setHistory((h) => [{ roll: result, win: isWin, amount: isWin ? payout : -betAmount }, ...h.slice(0, 9)]);
+    setStats((s) => ({ rolls: s.rolls + 1, wagered: s.wagered + snap.betAmount, won: s.won + payout }));
+    setHistory((h) => [{ roll: result, win: isWin, amount: isWin ? payout : -snap.betAmount }, ...h.slice(0, 9)]);
 
     if (isWin) {
       creditWin(payout);
@@ -85,15 +91,16 @@ export default function DiceRoll() {
     }
 
     if (user) {
-      publish({
-        kind: 4817,
-        content: JSON.stringify({ game: 'dice', roll: result, target, mode, bet: betAmount, payout, win: isWin }),
-        tags: [
-          ['d', `dice_${Date.now()}`],
-          ['t', 'casino'], ['t', 'dice'], ['t', isWin ? 'win' : 'loss'],
-          ['amount', betAmount.toString()], ['payout', payout.toString()],
-          ['alt', `0xPrivacy Casino — Dice: rolled ${result}, ${isWin ? `won ${payout} sats` : 'lost'}`],
-        ],
+      publishGameResult({
+        game: 'dice',
+        bet: snap.betAmount,
+        payout,
+        multiplier: isWin ? snap.effectiveMultiplier : 0,
+        outcome: `rolled ${result} (${snap.mode} ${snap.target})`,
+        serverSeed: serverSeedRef.current,
+        clientSeed: clientSeedRef.current,
+        nonce: nonceRef.current,
+        extra: { roll: result, target: snap.target, mode: snap.mode },
       });
     }
 

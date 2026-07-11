@@ -1,99 +1,185 @@
-# 0xPrivacy Casino - Nostr Protocol Events
+# 0xPrivacy Casino - Custom Nostr Event Kinds
 
-## Event Kinds
+## Kind 8867: Casino Game Result
 
-### Kind 4817: Casino Game Result (Regular)
+`draft` `optional`
 
-Regular event (1000-9999 range) for recording casino game results.
-This kind was generated to avoid collisions with any existing NIP kinds.
+A **regular event** (kind 8867) used by the 0xPrivacy Casino to record provably-fair casino game outcomes on the Nostr network. Each event represents a single game round and contains all the data needed to independently verify the outcome.
 
-**Content**: JSON object with game-specific data:
+### Event Format
 
 ```json
 {
-  "game": "slots|dice|roulette|blackjack|coinflip",
+  "kind": 8867,
+  "content": "<JSON string with game data>",
+  "tags": [
+    ["t", "casino"],
+    ["t", "<game-type>"],
+    ["t", "<result>"],
+    ["amount", "<bet-in-sats>"],
+    ["payout", "<payout-in-sats>"],
+    ["alt", "<human-readable summary>"]
+  ]
+}
+```
+
+### Tags (required)
+
+| Tag      | Description                                                              |
+| -------- | ------------------------------------------------------------------------ |
+| `t`      | `"casino"` - Identifies the event as a casino game result               |
+| `t`      | Game type: `"slots"`, `"dice"`, `"roulette"`, `"blackjack"`, `"coinflip"` |
+| `t`      | Result: `"win"` or `"loss"`                                             |
+| `amount` | Bet amount in satoshis                                                  |
+| `payout` | Payout amount in satoshis (0 for losses)                                |
+| `alt`    | Human-readable summary of the game outcome (NIP-31 style)               |
+
+### Content
+
+The `.content` field is a JSON string containing game-specific data and provably-fair verification information:
+
+```json
+{
+  "game": "slots",
   "bet": 1000,
-  "payout": 2500,
-  "multiplier": 2.5,
-  "serverSeed": "abc123...",
+  "payout": 5000,
+  "multiplier": 5,
+  "serverSeed": "<hex-encoded server seed>",
+  "clientSeed": "<hex-encoded client seed>",
   "nonce": 42
 }
 ```
 
-Game-specific fields are included (e.g. `reels` for slots, `roll` for dice, etc.)
+#### Content Fields
 
-**Tags**:
-- `["d", "<unique-game-id>"]` - Unique game round identifier
-- `["t", "casino"]` - Main category tag (relay-queryable)
-- `["t", "<game_type>"]` - Game type: slots, dice, roulette, blackjack, coinflip
-- `["t", "win"]` or `["t", "loss"]` - Outcome tag
-- `["amount", "<bet_sats>"]` - Bet amount in sats
-- `["payout", "<win_sats>"]` - Payout amount (0 for losses)
-- `["alt", "<human-readable>"]` - NIP-31 alt tag for unknown-event-aware clients
+| Field        | Type   | Description                                              |
+| ------------ | ------ | -------------------------------------------------------- |
+| `game`       | string | Game type identifier                                     |
+| `bet`        | number | Bet amount in satoshis                                   |
+| `payout`     | number | Amount won in satoshis (0 for losses)                    |
+| `multiplier` | number | Win multiplier applied (0 for losses)                    |
+| `serverSeed` | string | Server seed used for provably-fair RNG                   |
+| `clientSeed` | string | Client seed used for provably-fair RNG                   |
+| `nonce`      | number | Nonce value for the specific game round                  |
 
-**Query examples**:
-```json
-{ "kinds": [4817], "#t": ["casino"], "limit": 50 }
-{ "kinds": [4817], "#t": ["slots"], "limit": 20 }
-{ "kinds": [4817], "authors": ["<pubkey>"], "#t": ["win"] }
-```
+Additional game-specific fields may be present depending on the game type.
 
-### Kind 9347: Casino Transaction (Regular)
+#### Game-Specific Extra Fields
 
-Regular event for recording Cashu transactions related to gaming.
+**Slots:**
+- `reels`: Array of emoji symbols shown on each reel
 
-**Content**: JSON object with transaction details.
+**Dice:**
+- `roll`: The dice roll result (1-100)
+- `target`: The target number
+- `mode`: `"under"` or `"over"`
 
-**Tags**:
-- `["d", "<tx-id>"]`
-- `["t", "casino_transaction"]`
-- `["t", "<type>"]` - deposit, withdrawal, game_payment, payout
-- `["amount", "<sats>"]`
-- `["status", "<status>"]`
-- `["alt", "<human-readable>"]`
+**Roulette:**
+- `result`: The winning number (0-36)
+- `color`: `"red"`, `"black"`, or `"green"`
+- `bets`: Array of placed bets
 
-## Cashu Integration (NIP-60 & NIP-61)
+**Blackjack:**
+- `playerValue`: Final hand value of the player
+- `dealerValue`: Final hand value of the dealer
 
-The casino uses Cashu (Chaumian ecash) for payments. Relevant NIPs:
+**Coin Flip:**
+- `result`: `"heads"` or `"tails"`
+- `choice`: The player's chosen side
 
-### NIP-60 — Cashu Wallet
-- **Kind 17375**: Wallet event (replaceable, stores mints + encrypted P2PK privkey)
-- **Kind 7375**: Token events (encrypted Cashu proofs)
-- **Kind 7376**: Spending history events
-- **Kind 7374**: Reserved wallet tokens (quote tracking)
+### Provably Fair Verification
 
-### NIP-61 — Nutzaps
-- **Kind 10019**: Nutzap informational event (mints, relays, P2PK pubkey)
-- **Kind 9321**: Nutzap event (P2PK-locked Cashu token payment)
+Game outcomes are determined using SHA-256:
 
-### NIP-87 — Ecash Mint Discoverability
-- **Kind 38172**: Cashu Mint Announcement
-
-## Revenue Model
-
-Every wager carries a **2.5% total rake**:
-- **2.0%** goes to the house prize pool (funds player payouts)
-- **0.5%** goes to the dev fund (funds 0xPrivacy development)
-
-This is applied transparently via the `processWager()` function in `lib/cashu.ts`.
-
-## Provably Fair
-
-Game outcomes use SHA-256 HMAC:
 ```
 outcome = SHA-256(serverSeed + ":" + clientSeed + ":" + nonce)
 ```
 
-- `serverSeed`: Generated per session, hash published before play
-- `clientSeed`: Generated per session on client side
-- `nonce`: Incremented per game round
-- After session, full server seed is revealed for verification
+The first 4 bytes of the hash are converted to a 32-bit unsigned integer and normalized to [0, 1) to determine the game result. This allows anyone to independently verify that the outcome was fair by re-computing the hash.
 
-All seeds and nonces are included in the kind 4817 event content for public verification.
+### Querying
 
-## Privacy
+To fetch casino game results:
 
-- No KYC / no accounts — authenticate with Nostr keys only
-- Cashu ecash tokens are unlinkable (blind signatures)
-- The mint cannot correlate deposits to withdrawals
-- Game results are published to Nostr for transparency but contain no PII
+```json
+{
+  "kinds": [8867],
+  "#t": ["casino"],
+  "limit": 50
+}
+```
+
+To fetch a specific game type:
+
+```json
+{
+  "kinds": [8867],
+  "#t": ["casino", "slots"],
+  "limit": 20
+}
+```
+
+To fetch a specific user's history:
+
+```json
+{
+  "kinds": [8867],
+  "authors": ["<pubkey>"],
+  "#t": ["casino"],
+  "limit": 20
+}
+```
+
+### Revenue Model
+
+All wagers carry a 2.5% total rake:
+- **2.0%** goes to the house prize pool (funds player winnings)
+- **0.5%** goes to the developer fund
+
+The effective payout multiplier is calculated as:
+
+```
+effectivePayout = (betAmount - rake) * multiplier
+```
+
+### Relationship to Other NIPs
+
+- **NIP-60 (Cashu Wallet):** The casino uses Cashu ecash (Chaumian Ecash) for deposits and withdrawals. Player balances are stored client-side as Cashu proofs.
+- **NIP-87 (Cashu Discoverability):** Mints used by the casino can be discovered via NIP-87 events.
+- **NIP-61 (Nutzaps):** Future integration could allow nutzaps as a deposit mechanism.
+
+### Example Events
+
+#### Slots Win
+
+```json
+{
+  "kind": 8867,
+  "content": "{\"game\":\"slots\",\"bet\":1000,\"payout\":4875,\"multiplier\":5,\"serverSeed\":\"a1b2c3...\",\"clientSeed\":\"d4e5f6...\",\"nonce\":7,\"reels\":[\"cherry\",\"cherry\",\"cherry\"]}",
+  "tags": [
+    ["t", "casino"],
+    ["t", "slots"],
+    ["t", "win"],
+    ["amount", "1000"],
+    ["payout", "4875"],
+    ["alt", "0xPrivacy Casino - slots: cherry cherry cherry (won 4875 sats)"]
+  ]
+}
+```
+
+#### Dice Loss
+
+```json
+{
+  "kind": 8867,
+  "content": "{\"game\":\"dice\",\"bet\":500,\"payout\":0,\"multiplier\":0,\"serverSeed\":\"f1e2d3...\",\"clientSeed\":\"c4b5a6...\",\"nonce\":12,\"roll\":67,\"target\":50,\"mode\":\"under\"}",
+  "tags": [
+    ["t", "casino"],
+    ["t", "dice"],
+    ["t", "loss"],
+    ["amount", "500"],
+    ["payout", "0"],
+    ["alt", "0xPrivacy Casino - dice: rolled 67 (under 50) (lost)"]
+  ]
+}
+```

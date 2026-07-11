@@ -3,7 +3,7 @@ import GameLayout from '@/components/casino/GameLayout';
 import { Badge } from '@/components/ui/badge';
 import { useCashu } from '@/contexts/CashuContext';
 import { processWager, generateSeed, provablyFairRandom } from '@/lib/cashu';
-import { useNostrPublish } from '@/hooks/useNostrPublish';
+import { useCasinoEvents } from '@/hooks/useCasinoEvents';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { Zap, RotateCw } from 'lucide-react';
 
@@ -59,7 +59,7 @@ function getBetMultiplier(betType: BetType): number {
 export default function Roulette() {
   const { balance, placeBet, creditWin, isInitialized } = useCashu();
   const { user } = useCurrentUser();
-  const { mutate: publish } = useNostrPublish();
+  const { publishGameResult } = useCasinoEvents();
 
   const [result, setResult] = useState<number | null>(null);
   const [spinning, setSpinning] = useState(false);
@@ -147,15 +147,16 @@ export default function Roulette() {
       }
 
       if (user) {
-        publish({
-          kind: 4817,
-          content: JSON.stringify({ game: 'roulette', result: winNumber, bets, payout: totalPayout }),
-          tags: [
-            ['d', `roulette_${Date.now()}`],
-            ['t', 'casino'], ['t', 'roulette'], ['t', totalPayout > 0 ? 'win' : 'loss'],
-            ['amount', totalBet.toString()], ['payout', totalPayout.toString()],
-            ['alt', `0xPrivacy Casino — Roulette: ${winNumber} — ${totalPayout > 0 ? `won ${totalPayout} sats` : 'no win'}`],
-          ],
+        publishGameResult({
+          game: 'roulette',
+          bet: totalBet,
+          payout: totalPayout,
+          multiplier: totalPayout > 0 ? totalPayout / totalBet : 0,
+          outcome: `${winNumber} ${getColor(winNumber)}`,
+          serverSeed: serverSeedRef.current,
+          clientSeed: clientSeedRef.current,
+          nonce: nonceRef.current,
+          extra: { result: winNumber, color: getColor(winNumber), bets },
         });
       }
 

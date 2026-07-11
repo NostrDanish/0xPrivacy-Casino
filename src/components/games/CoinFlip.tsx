@@ -2,7 +2,7 @@ import { useState, useRef } from 'react';
 import GameLayout from '@/components/casino/GameLayout';
 import { useCashu } from '@/contexts/CashuContext';
 import { processWager, generateSeed, provablyFairRandom } from '@/lib/cashu';
-import { useNostrPublish } from '@/hooks/useNostrPublish';
+import { useCasinoEvents } from '@/hooks/useCasinoEvents';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { Zap } from 'lucide-react';
 
@@ -13,7 +13,7 @@ type Side = 'heads' | 'tails';
 export default function CoinFlip() {
   const { balance, placeBet, creditWin, isInitialized } = useCashu();
   const { user } = useCurrentUser();
-  const { mutate: publish } = useNostrPublish();
+  const { publishGameResult } = useCasinoEvents();
 
   const [betIdx, setBetIdx] = useState(2);
   const [choice, setChoice] = useState<Side>('heads');
@@ -28,15 +28,19 @@ export default function CoinFlip() {
   const serverSeedRef = useRef(generateSeed());
   const clientSeedRef = useRef(generateSeed());
   const nonceRef = useRef(0);
+  const flipSnapshotRef = useRef({ betAmount: BET_STEPS[betIdx], choice: 'heads' as Side });
 
   const betAmount = BET_STEPS[betIdx];
-  const payout = Math.floor(betAmount * (2 * 0.975)); // ~1.95× (after 2.5% rake)
+  const estimatedPayout = Math.floor(betAmount * (2 * 0.975)); // ~1.95× (after 2.5% rake)
   const canFlip = isInitialized && !flipping && balance >= betAmount;
 
   const doFlip = async () => {
     if (!canFlip) return;
     const ok = await placeBet(betAmount);
     if (!ok) return;
+
+    // Capture values at flip time
+    flipSnapshotRef.current = { betAmount, choice };
 
     setFlipping(true);
     setMsg('');
@@ -54,17 +58,18 @@ export default function CoinFlip() {
   };
 
   const finalise = async () => {
+    const snap = flipSnapshotRef.current;
     const r = await provablyFairRandom(serverSeedRef.current, clientSeedRef.current, nonceRef.current);
     const flip: Side = r < 0.5 ? 'heads' : 'tails';
     setCoinFace(flip);
     setResult(flip);
 
-    const isWin = flip === choice;
-    const { payout: p } = processWager(betAmount, isWin ? 2 : 0);
+    const isWin = flip === snap.choice;
+    const { payout: p } = processWager(snap.betAmount, isWin ? 2 : 0);
 
     setStats((s) => ({
       flips: s.flips + 1,
-      wagered: s.wagered + betAmount,
+      wagered: s.wagered + snap.betAmount,
       won: s.won + (isWin ? p : 0),
     }));
     setHistory((h) => [{ side: flip, win: isWin }, ...h.slice(0, 14)]);
@@ -79,15 +84,16 @@ export default function CoinFlip() {
     }
 
     if (user) {
-      publish({
-        kind: 4817,
-        content: JSON.stringify({ game: 'coinflip', result: flip, choice, bet: betAmount, payout: p, win: isWin }),
-        tags: [
-          ['d', `flip_${Date.now()}`], ['t', 'casino'], ['t', 'coinflip'],
-          ['t', isWin ? 'win' : 'loss'],
-          ['amount', betAmount.toString()], ['payout', p.toString()],
-          ['alt', `0xPrivacy Casino — Coin Flip: ${flip} — ${isWin ? `won ${p} sats` : 'lost'}`],
-        ],
+      publishGameResult({
+        game: 'coinflip',
+        bet: snap.betAmount,
+        payout: p,
+        multiplier: isWin ? 2 : 0,
+        outcome: `${flip} (chose ${snap.choice})`,
+        serverSeed: serverSeedRef.current,
+        clientSeed: clientSeedRef.current,
+        nonce: nonceRef.current,
+        extra: { result: flip, choice: snap.choice },
       });
     }
 
@@ -174,7 +180,7 @@ export default function CoinFlip() {
                 <div className="text-xs text-muted-foreground">Multiplier</div>
               </div>
               <div className="rounded-xl bg-secondary/40 py-2.5">
-                <div className="font-bold text-lg text-casino-green">+{payout.toLocaleString()}</div>
+                <div className="font-bold text-lg text-casino-green">+{estimatedPayout.toLocaleString()}</div>
                 <div className="text-xs text-muted-foreground">Win sats</div>
               </div>
             </div>

@@ -1,9 +1,8 @@
 import { useState, useRef, useCallback } from 'react';
 import GameLayout from '@/components/casino/GameLayout';
-import { Badge } from '@/components/ui/badge';
 import { useCashu } from '@/contexts/CashuContext';
 import { processWager, generateSeed, provablyFairRandom } from '@/lib/cashu';
-import { useNostrPublish } from '@/hooks/useNostrPublish';
+import { useCasinoEvents } from '@/hooks/useCasinoEvents';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { Zap } from 'lucide-react';
 
@@ -76,7 +75,7 @@ function CardView({ card }: { card: Card }) {
 export default function Blackjack() {
   const { balance, placeBet, creditWin, isInitialized } = useCashu();
   const { user } = useCurrentUser();
-  const { mutate: publish } = useNostrPublish();
+  const { publishGameResult } = useCasinoEvents();
 
   const [phase, setPhase] = useState<Phase>('idle');
   const [deck, setDeck] = useState<Card[]>([]);
@@ -225,15 +224,16 @@ export default function Blackjack() {
     }));
 
     if (user) {
-      publish({
-        kind: 4817,
-        content: JSON.stringify({ game: 'blackjack', outcome, playerValue: handValue(pHand), dealerValue: handValue(dHand), bet: effectiveBet, payout: p }),
-        tags: [
-          ['d', `bj_${Date.now()}`], ['t', 'casino'], ['t', 'blackjack'],
-          ['t', mult >= 2 ? 'win' : mult > 0 ? 'push' : 'loss'],
-          ['amount', effectiveBet.toString()], ['payout', p.toString()],
-          ['alt', `0xPrivacy Casino — Blackjack: ${outcome} — ${p > 0 ? `+${p} sats` : 'lost'}`],
-        ],
+      publishGameResult({
+        game: 'blackjack',
+        bet: effectiveBet,
+        payout: p,
+        multiplier: mult,
+        outcome,
+        serverSeed: serverSeedRef.current,
+        clientSeed: clientSeedRef.current,
+        nonce: nonceRef.current,
+        extra: { playerValue: handValue(pHand), dealerValue: handValue(dHand) },
       });
     }
   };

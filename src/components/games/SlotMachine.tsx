@@ -1,10 +1,9 @@
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef } from 'react';
 import GameLayout from '@/components/casino/GameLayout';
-import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { useCashu } from '@/contexts/CashuContext';
 import { processWager, generateSeed, provablyFairRandom } from '@/lib/cashu';
-import { useNostrPublish } from '@/hooks/useNostrPublish';
+import { useCasinoEvents } from '@/hooks/useCasinoEvents';
 import { useCurrentUser } from '@/hooks/useCurrentUser';
 import { RotateCw, Zap, ChevronUp, ChevronDown } from 'lucide-react';
 
@@ -32,7 +31,7 @@ const BET_STEPS = [100, 200, 500, 1_000, 2_000, 5_000, 10_000];
 export default function SlotMachine() {
   const { balance, placeBet, creditWin, isInitialized } = useCashu();
   const { user } = useCurrentUser();
-  const { mutate: publish } = useNostrPublish();
+  const { publishGameResult } = useCasinoEvents();
 
   const [reels, setReels] = useState<Symbol[]>(['🍒', '⭐', '💎']);
   const [spinning, setSpinning] = useState(false);
@@ -118,17 +117,16 @@ export default function SlotMachine() {
 
     // Publish to Nostr
     if (user) {
-      publish({
-        kind: 4817,
-        content: JSON.stringify({ game: 'slots', reels, bet: betAmount, payout, multiplier, serverSeed: serverSeedRef.current, nonce: nonceRef.current }),
-        tags: [
-          ['d', `slots_${Date.now()}`],
-          ['t', 'casino'], ['t', 'slots'],
-          ['t', payout > 0 ? 'win' : 'loss'],
-          ['amount', betAmount.toString()],
-          ['payout', payout.toString()],
-          ['alt', `0xPrivacy Casino — Slots: ${reels.join('')} — ${payout > 0 ? `Won ${payout} sats` : 'No win'}`],
-        ],
+      publishGameResult({
+        game: 'slots',
+        bet: betAmount,
+        payout,
+        multiplier,
+        outcome: reels.join(''),
+        serverSeed: serverSeedRef.current,
+        clientSeed: clientSeedRef.current,
+        nonce: nonceRef.current,
+        extra: { reels },
       });
     }
 
