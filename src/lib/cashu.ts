@@ -72,8 +72,24 @@ export function generateSeed(length = 32): string {
 
 // ─── Real Cashu Wallet ──────────────────────────────────────────────────────
 
+/**
+ * CasinoWallet holds two kinds of balances:
+ *
+ *  1. Real proofs — actual Cashu ecash minted by the mint. These can be
+ *     melted via Lightning or exported as tokens at any time.
+ *
+ *  2. House credit — an IOU for game winnings. In this client-side model
+ *     there is no house server to sign real ecash for payouts, so winnings
+ *     are tracked as spendable credit. They can be used to keep playing,
+ *     but they cannot be melted/exported until the operator pays them out
+ *     (e.g. by sending a real Cashu token to the player).
+ *
+ * Mixing synthetic proofs with real ones breaks mint operations (the mint
+ * rejects invalid commitments), so credit is kept as a plain number.
+ */
 export class CasinoWallet {
   private proofs: Proof[] = [];
+  private _houseCredit = 0;
   private mintUrl: string;
   private sdkWallet: SDKWallet | null = null;
 
@@ -88,12 +104,28 @@ export class CasinoWallet {
     await this.sdkWallet.loadMint();
   }
 
-  get balance(): number {
+  /** Real ecash balance (minted proofs only). */
+  get realBalance(): number {
     return this.proofs.reduce((s, p) => s + p.amount, 0);
+  }
+
+  /** House credit from winnings (IOU, playable but not melt-able). */
+  get houseCredit(): number {
+    return this._houseCredit;
+  }
+
+  /** Total playable balance = real ecash + house credit. */
+  get balance(): number {
+    return this.realBalance + this._houseCredit;
   }
 
   getMintUrl(): string { return this.mintUrl; }
   getProofs(): Proof[] { return [...this.proofs]; }
+
+  /** Add playable house credit (e.g. game winnings). */
+  addHouseCredit(amount: number): void {
+    if (amount > 0) this._houseCredit += amount;
+  }
 
   // ── Deposit (Lightning) ────────────────────────────────────────────────
 
@@ -162,12 +194,23 @@ export class CasinoWallet {
 
   // ── Game operations ────────────────────────────────────────────────────
 
-  async deductBet(amount: number): Promise<Proof[]> {
+  /**
+   * Deduct a bet. Spends house credit first; only touches real proofs
+   * (via the mint) for the remainder. Real ecash is never contaminated.
+   */
+  async deductBet(amount: number): Promise<void> {
     if (this.balance < amount) throw new Error('Insufficient balance');
-    await this.init();
-    const { keep, send } = await this.sdkWallet!.send(amount, this.proofs);
-    this.proofs = keep;
-    return send;
+
+    const fromCredit = Math.min(this._houseCredit, amount);
+    const fromProofs = amount - fromCredit;
+
+    this._houseCredit -= fromCredit;
+
+    if (fromProofs > 0) {
+      await this.init();
+      const { keep } = await this.sdkWallet!.send(fromProofs, this.proofs);
+      this.proofs = keep;
+    }
   }
 
   addProofs(proofs: Proof[]): void {
@@ -176,13 +219,14 @@ export class CasinoWallet {
 
   // ── Serialisation ──────────────────────────────────────────────────────
 
-  toJSON(): { proofs: Proof[]; mintUrl: string } {
-    return { proofs: this.proofs, mintUrl: this.mintUrl };
+  toJSON(): { proofs: Proof[]; mintUrl: string; houseCredit: number } {
+    return { proofs: this.proofs, mintUrl: this.mintUrl, houseCredit: this._houseCredit };
   }
 
-  static fromJSON(data: { proofs: Proof[]; mintUrl: string }): CasinoWallet {
+  static fromJSON(data: { proofs: Proof[]; mintUrl: string; houseCredit?: number }): CasinoWallet {
     const w = new CasinoWallet(data.mintUrl);
     w.proofs = data.proofs ?? [];
+    w._houseCredit = data.houseCredit ?? 0;
     return w;
   }
 }

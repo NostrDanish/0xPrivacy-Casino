@@ -20,7 +20,7 @@ type Tab = 'overview' | 'deposit' | 'withdraw' | 'backup';
 export default function WalletPanel({ onClose }: Props) {
   const { toast } = useToast();
   const {
-    balance, isInitialized, isLoading, houseStats, mintUrl,
+    balance, realBalance, houseCredit, isInitialized, isLoading, houseStats, mintUrl,
     initializeWallet,
     requestDeposit, checkDeposit, finalizeDeposit,
     requestWithdraw, executeWithdraw,
@@ -175,9 +175,18 @@ export default function WalletPanel({ onClose }: Props) {
         <div className="mx-6 mt-4 p-4 rounded-xl bg-gradient-to-br from-purple-900/30 to-violet-900/20 border border-purple-700/30">
           <div className="text-xs text-muted-foreground mb-1">Available Balance</div>
           <div className="text-3xl font-bold text-gold">{balance.toLocaleString()} sats</div>
-          <div className="text-xs text-muted-foreground mt-1.5 flex items-center gap-1.5">
-            <span className="w-1.5 h-1.5 rounded-full bg-casino-green" />
-            Mint: {mintUrl.replace('https://', '').split('/')[0]}
+          <div className="text-xs text-muted-foreground mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1">
+            <span className="flex items-center gap-1.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-casino-green" />
+              Deposits: {realBalance.toLocaleString()}
+            </span>
+            {houseCredit > 0 && (
+              <span className="flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-violet-400" />
+                Winnings credit: {houseCredit.toLocaleString()}
+              </span>
+            )}
+            <span className="w-full text-muted-foreground/70">Mint: {mintUrl.replace('https://', '').split('/')[0]}</span>
           </div>
         </div>
 
@@ -333,6 +342,15 @@ export default function WalletPanel({ onClose }: Props) {
           {/* ── Withdraw (Lightning) ── */}
           {tab === 'withdraw' && (
             <div className="space-y-4">
+              {/* Winnings credit notice */}
+              {houseCredit > 0 && (
+                <div className="p-3 rounded-lg bg-violet-900/15 border border-violet-700/25 text-xs text-violet-200/80">
+                  <span className="font-semibold text-violet-300">Winnings credit: {houseCredit.toLocaleString()} sats.</span>{' '}
+                  Winnings are playable immediately. To cash out, request payout from the operator (a real Cashu token
+                  will be sent to you), then import it here.
+                </div>
+              )}
+
               {!exportedToken ? (
                 <>
                   {!meltQuote ? (
@@ -351,7 +369,7 @@ export default function WalletPanel({ onClose }: Props) {
                       </div>
                       <Button
                         onClick={handleGetMeltQuote}
-                        disabled={isLoading || !lnInvoice.trim() || balance <= 0}
+                        disabled={isLoading || !lnInvoice.trim() || realBalance <= 0}
                         className="w-full bg-gradient-to-r from-green-700 to-emerald-700 hover:from-green-600 hover:to-emerald-600 font-bold"
                       >
                         <ArrowUpFromLine className="mr-2 w-4 h-4" />
@@ -371,11 +389,11 @@ export default function WalletPanel({ onClose }: Props) {
                             onChange={(e) => setExportAmt(Number(e.target.value))}
                             className="bg-secondary/60 border-border/60 font-mono flex-1"
                             min={1}
-                            max={balance}
+                            max={realBalance}
                           />
                           <Button
                             onClick={handleExportToken}
-                            disabled={isLoading || exportAmt < 1 || exportAmt > balance}
+                            disabled={isLoading || exportAmt < 1 || exportAmt > realBalance}
                             size="sm"
                             className="bg-green-700 hover:bg-green-600 text-white shrink-0"
                           >
@@ -405,7 +423,7 @@ export default function WalletPanel({ onClose }: Props) {
                       </div>
                       <Button
                         onClick={handleExecuteMelt}
-                        disabled={isLoading || balance < meltQuote.amount + meltQuote.fee_reserve}
+                        disabled={isLoading || realBalance < meltQuote.amount + meltQuote.fee_reserve}
                         className="w-full bg-gradient-to-r from-green-700 to-emerald-700 hover:from-green-600 hover:to-emerald-600 font-bold"
                       >
                         <Zap className="mr-2 w-4 h-4" />

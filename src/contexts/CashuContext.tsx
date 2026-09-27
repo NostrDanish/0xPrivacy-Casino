@@ -8,7 +8,7 @@ import {
   loadHouseStats, HouseStats,
   adjustPoolBalance, withdrawDevFund, resetHouseStats,
   processWager, isValidCashuToken, decodeTokenAmount,
-  type Proof, type MintQuoteResponse, type MeltQuoteResponse,
+  type MintQuoteResponse, type MeltQuoteResponse,
   MintQuoteState,
 } from '@/lib/cashu';
 
@@ -18,7 +18,12 @@ export interface CashuContextType {
   wallet: CasinoWallet | null;
   isInitialized: boolean;
   isLoading: boolean;
+  /** Total playable balance (real ecash + house credit). */
   balance: number;
+  /** Real Cashu ecash balance — always withdrawable/exportable. */
+  realBalance: number;
+  /** House credit from winnings — playable, paid out by the operator. */
+  houseCredit: number;
   houseStats: HouseStats;
   mintUrl: string;
 
@@ -82,14 +87,18 @@ export function CashuProvider({ children }: { children: ReactNode }) {
 
   const walletRef = useRef<CasinoWallet | null>(loadWallet());
   const [balance, setBalance] = useState<number>(walletRef.current?.balance ?? 0);
+  const [realBalance, setRealBalance] = useState<number>(walletRef.current?.realBalance ?? 0);
+  const [houseCredit, setHouseCredit] = useState<number>(walletRef.current?.houseCredit ?? 0);
   const [isInitialized, setIsInitialized] = useState<boolean>(walletRef.current !== null);
   const [isLoading, setIsLoading] = useState(false);
   const [houseStats, setHouseStats] = useState<HouseStats>(loadHouseStats());
 
   const syncBalance = useCallback(() => {
-    const b = walletRef.current?.balance ?? 0;
-    setBalance(b);
-    if (walletRef.current) saveWallet(walletRef.current);
+    const w = walletRef.current;
+    setBalance(w?.balance ?? 0);
+    setRealBalance(w?.realBalance ?? 0);
+    setHouseCredit(w?.houseCredit ?? 0);
+    if (w) saveWallet(w);
   }, []);
 
   const syncHouse = useCallback(() => {
@@ -190,13 +199,22 @@ export function CashuProvider({ children }: { children: ReactNode }) {
     }
   }, [toast]);
 
-  const executeWithdraw = useCallback(async (invoice: string, quote: MeltQuoteResponse): Promise<boolean> => {
+  const executeWithdraw = useCallback(async (_invoice: string, quote: MeltQuoteResponse): Promise<boolean> => {
     if (!walletRef.current) return false;
     setIsLoading(true);
     try {
-      await walletRef.current.meltProofs(invoice, quote);
+      const w = walletRef.current;
+      if (w.realBalance < quote.amount + quote.fee_reserve) {
+        toast({
+          title: 'Not enough real ecash',
+          description: 'Lightning withdrawals use your real deposits. Winnings credit is paid out by the operator.',
+          variant: 'destructive',
+        });
+        return false;
+      }
+      await w.meltProofs(quote);
       syncBalance();
-      toast({ title: 'Withdrawal sent!', description: `Lightning payment sent successfully.` });
+      toast({ title: 'Withdrawal sent!', description: 'Lightning payment sent successfully.' });
       return true;
     } catch (e) {
       syncBalance();
@@ -227,8 +245,12 @@ export function CashuProvider({ children }: { children: ReactNode }) {
   }, [syncBalance, toast]);
 
   const exportToken = useCallback(async (amount: number): Promise<string | null> => {
-    if (!walletRef.current || walletRef.current.balance < amount) {
-      toast({ title: 'Insufficient balance', variant: 'destructive' });
+    if (!walletRef.current || walletRef.current.realBalance < amount) {
+      toast({
+        title: 'Not enough real ecash',
+        description: 'Only real deposits can be exported as Cashu tokens. Winnings credit is paid out by the operator.',
+        variant: 'destructive',
+      });
       return null;
     }
     setIsLoading(true);
@@ -283,16 +305,10 @@ export function CashuProvider({ children }: { children: ReactNode }) {
 
   const creditWin = useCallback((amount: number) => {
     if (!walletRef.current || amount <= 0) return;
-    // For simplicity in the client-side model, we credit synthetic proofs.
-    // In a production multi-player environment, these would be real proofs
-    // from the house wallet on a server.
-    const syntheticProofs: Proof[] = [{
-      id: 'casino-win',
-      amount,
-      secret: crypto.getRandomValues(new Uint8Array(32)).reduce((s, b) => s + b.toString(16).padStart(2, '0'), ''),
-      C: '0'.repeat(66),
-    }];
-    walletRef.current.addProofs(syntheticProofs);
+    // Winnings are house credit: playable immediately, but kept separate from
+    // real ecash so mint operations (withdraw/export) are never broken by
+    // invalid proofs. The operator pays out credit via real Cashu tokens.
+    walletRef.current.addHouseCredit(amount);
     syncBalance();
     syncHouse();
   }, [syncBalance, syncHouse]);
@@ -362,6 +378,8 @@ export function CashuProvider({ children }: { children: ReactNode }) {
     isInitialized,
     isLoading,
     balance,
+    realBalance,
+    houseCredit,
     houseStats,
     mintUrl: walletRef.current?.getMintUrl() ?? DEFAULT_MINT_URL,
     initializeWallet,

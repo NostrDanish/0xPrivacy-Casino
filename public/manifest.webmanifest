@@ -1,0 +1,17 @@
+{
+  "name": "0xPrivacy Casino",
+  "short_name": "0xPrivacy",
+  "description": "Decentralized, privacy-first Bitcoin casino built on Nostr + Cashu ecash.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#0d0f16",
+  "theme_color": "#7c3aed",
+  "icons": [
+    {
+      "src": "/logo.webp",
+      "sizes": "512x512",
+      "type": "image/webp",
+      "purpose": "any"
+    }
+  ]
+}
